@@ -103,6 +103,9 @@ export default (sequelize, DataTypes) => {
             otherKey: "member_id",
             as: "assignedMembers",
         });
+
+
+        
     };
 
     return Issue;

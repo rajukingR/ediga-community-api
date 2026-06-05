@@ -8,14 +8,14 @@ import {
   updateIssue,
   updateIssueStatus,
   deleteIssue,
-  assignMultipleProfessionals, // Add this import
+  assignMultipleMembers, // Add this import
   updateIssueMemberStatus
 } from "../controllers/issueController.js";
 import authMiddleware from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-router.post("/create", authMiddleware, createIssue);
+router.post("/create", createIssue);
 router.get("/", authMiddleware, getAllIssues);
 router.get("/user/:id", authMiddleware, getAllIssuesByUserId);
 router.get("/assigned-by/:id", authMiddleware, getAllIssuesById);
@@ -25,6 +25,6 @@ router.patch("/:id/status", authMiddleware, updateIssueMemberStatus);
 router.delete("/:id", authMiddleware, deleteIssue);
 
 // Add this new route for assigning multiple professionals
-router.post("/assign-multiple", authMiddleware, assignMultipleProfessionals);
+router.post("/assign-multiple", authMiddleware, assignMultipleMembers);
 
 export default router;

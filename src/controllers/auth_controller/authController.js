@@ -4,18 +4,27 @@ import db from '../../models/index.js';
 import { Op } from "sequelize";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import { sendPushToUser } from "../../services/pushService.js";
 
 const User = db.User;
+const Notification = db.Notification;
 
 // Helper function to calculate age from date of birth
 const calculateAge = (dob) => {
   const today = new Date();
   const birthDate = new Date(dob);
+
   let age = today.getFullYear() - birthDate.getFullYear();
+
   const monthDiff = today.getMonth() - birthDate.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && today.getDate() < birthDate.getDate())
+  ) {
     age--;
   }
+
   return age;
 };
 
@@ -23,62 +32,85 @@ const calculateAge = (dob) => {
 const formatUserResponse = (user) => {
   return {
     id: user.id,
+    member_id: user.member_id,
+
     full_name: user.full_name,
     parents_name: user.parents_name,
     member_type: user.member_type,
+    superior_id: user.superior_id,
     category: user.category,
     blood_group: user.blood_group,
+
     date_of_birth: user.date_of_birth,
     age: user.age,
+
     years_of_experience: user.years_of_experience,
-    service_type: user.service_type, // Added new field
+    service_type: user.service_type,
+
     voter_id: user.voter_id,
     aadhaar_number: user.aadhaar_number,
+
     organization: user.organization,
     profession: user.profession,
     business_description: user.business_description,
+
     address: user.address,
+
     booth_no: user.booth_no,
     taluk_zone: user.taluk_zone,
     city: user.city,
     district: user.district,
     state: user.state,
     pin_code: user.pin_code,
+
     ls_sabha: user.ls_sabha,
     vs_sabha: user.vs_sabha,
+
+    panchayat: user.panchayat,
+    ward: user.ward,
+    area: user.area,
+
     mobile_1: user.mobile_1,
     mobile_2: user.mobile_2,
     phone_1: user.phone_1,
     phone_2: user.phone_2,
+
     email: user.email,
+    email_2: user.email_2,
+    website: user.website,
+
     status: user.status,
     is_active: user.is_active,
     remark: user.remark,
+
     document_file: user.document_file,
     photo: user.photo,
+    aadhaar_photo: user.aadhaar_photo,
+    voter_photo: user.voter_photo,
+
     last_login: user.last_login,
     created_at: user.created_at,
     updated_at: user.updated_at
   };
 };
 
-// =========================
-// SIGNUP / REGISTRATION
-// =========================
+
 export const signup = async (req, res) => {
   try {
     const {
       full_name,
       parents_name,
       member_type,
+      created_by_id,
       category,
       blood_group,
       date_of_birth,
       age,
       years_of_experience,
-      service_type, // Added new field
+      service_type,
       voter_id,
       aadhaar_number,
+      member_id,
       organization,
       profession,
       business_description,
@@ -91,25 +123,30 @@ export const signup = async (req, res) => {
       pin_code,
       ls_sabha,
       vs_sabha,
+      panchayat,
+      ward,
+      area,
       mobile_1,
       mobile_2,
       phone_1,
       phone_2,
-      email,
+      email_1,
+      email_2,
+      website,
       password,
       remark
     } = req.body;
 
-    // REQUIRED VALIDATION
-    if (!full_name || !email || !password) {
+    // Validation
+    if (!full_name || !email_1 || !password) {
       return res.status(400).json({
         success: false,
         message: "Full name, email and password are required",
       });
     }
 
-    // EMAIL CHECK
-    const existingUser = await User.findOne({ where: { email } });
+    // Check existing user
+    const existingUser = await User.findOne({ where: { email: email_1 } });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -117,7 +154,7 @@ export const signup = async (req, res) => {
       });
     }
 
-    // MOBILE CHECK (if provided)
+    // Check mobile
     if (mobile_1) {
       const existingMobile = await User.findOne({ where: { mobile_1 } });
       if (existingMobile) {
@@ -128,23 +165,73 @@ export const signup = async (req, res) => {
       }
     }
 
-    // Validate service_type for volunteer members
-    if (member_type === 'volunteer_member' && !service_type) {
+    // Validate service type for volunteer_member and professional_volunteer
+    if ((member_type === 'volunteer_member' || member_type === 'professional_volunteer') && !service_type) {
       return res.status(400).json({
         success: false,
-        message: "Service type is required for volunteer members",
+        message: "Service type is required for volunteer members and professional volunteers",
       });
     }
 
-    // PASSWORD HASH
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ========== WEBSITE SELF-REGISTRATION (ALL TYPES) ==========
+    // No permission checks - anyone can register any type via website
+    // All registrations need admin approval
+    let status = "pending";
+    let needsApproval = true;
+    let notificationsData = [];
 
+    // For website registration, created_by_id should ALWAYS be null
+    // But if someone sends it, we ignore and set to null
+    const finalCreatedById = null; // Force null for website registration
+    
+    // Get all admins for notification
+    const admins = await User.findAll({ 
+      where: { member_type: 'admin', is_active: 1 }
+    });
+
+    // Role text mapping for notifications
+    const roleText = {
+      'professional_volunteer': 'Professional Volunteer',
+      'volunteer_member': 'Volunteer Member',
+      'member': 'Member'
+    };
+
+    const memberTypeText = roleText[member_type] || member_type;
+    const newMemberName = full_name;
+
+    // Prepare notifications for all admins
+    for (const admin of admins) {
+      let adminMessage = '';
+      
+      if (member_type === 'professional_volunteer') {
+        adminMessage = `${full_name} registered as a ${memberTypeText} (Service: ${service_type || 'N/A'}). Please review and approve.`;
+      } else if (member_type === 'volunteer_member') {
+        adminMessage = `${full_name} registered as a ${memberTypeText} (Service: ${service_type || 'N/A'}). Please review and approve.`;
+      } else {
+        adminMessage = `${full_name} registered as a ${memberTypeText}. Please review and approve.`;
+      }
+      
+      notificationsData.push({
+        user_id: admin.id,
+        message: adminMessage,
+        user_type: 'admin',
+        recipient_name: admin.full_name,
+        push_title: "🔔 New Member Registration",
+        push_body: adminMessage
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
     // Handle file uploads
     const document_file = req.files?.document_file?.[0]?.filename || null;
     const photo = req.files?.photo?.[0]?.filename || null;
+    const aadhaar_photo = req.files?.aadhaar_photo?.[0]?.filename || null;
+    const voter_photo = req.files?.voter_photo?.[0]?.filename || null;
 
+    // Parse address
     let parsedAddress = address;
-
     if (typeof address === "string") {
       try {
         parsedAddress = JSON.parse(address);
@@ -153,51 +240,121 @@ export const signup = async (req, res) => {
       }
     }
 
-    // CREATE USER
+    // Generate member_id if not provided
+    const finalMemberId = member_id || `MEM${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    // Create user (superior_id is always NULL for website registration)
     const newUser = await User.create({
+      member_id: finalMemberId,
       full_name,
       parents_name,
       member_type,
-      category,
-      blood_group,
-      date_of_birth,
+      superior_id: null,  // Always null for website registration
+      category: category || null,
+      blood_group: blood_group || null,
+      date_of_birth: date_of_birth || null,
       age: age || (date_of_birth ? calculateAge(date_of_birth) : null),
       years_of_experience: years_of_experience || null,
-      service_type: member_type === 'volunteer_member' ? service_type : null, // Added new field
-      voter_id,
-      aadhaar_number,
-      organization,
-      profession,
-      business_description,
+      service_type: (member_type === 'volunteer_member' || member_type === 'professional_volunteer') ? service_type : null,
+      voter_id: voter_id || null,
+      aadhaar_number: aadhaar_number || null,
+      organization: organization || null,
+      profession: profession || null,
+      business_description: business_description || null,
       address: parsedAddress,
-      booth_no,
-      taluk_zone,
-      city,
-      district,
-      state,
-      pin_code,
-      ls_sabha,
-      vs_sabha,
-      mobile_1,
-      mobile_2,
-      phone_1,
-      phone_2,
-      email,
+      booth_no: booth_no || null,
+      taluk_zone: taluk_zone || null,
+      city: city || null,
+      district: district || null,
+      state: state || null,
+      pin_code: pin_code || null,
+      ls_sabha: ls_sabha || null,
+      vs_sabha: vs_sabha || null,
+      panchayat: panchayat || null,
+      ward: ward || null,
+      area: area || null,
+      mobile_1: mobile_1 || null,
+      mobile_2: mobile_2 || null,
+      phone_1: phone_1 || null,
+      phone_2: phone_2 || null,
+      email: email_1,
+      email_2: email_2 || null,
+      website: website || null,
       password: hashedPassword,
-      status: "pending",
-      is_active: true,
-      remark,
-      document_file,
-      photo,
+      status: status,  // Always 'pending' for website registration
+      is_active: 1,
+      remark: remark || null,
+      document_file: document_file,
+      photo: photo,
+      aadhaar_photo: aadhaar_photo,
+      voter_photo: voter_photo,
       created_at: new Date(),
-      updated_at: new Date()
+      updated_at: new Date(),
     });
 
+    // ========== SEND NOTIFICATIONS TO ADMINS ==========
+    if (notificationsData.length > 0) {
+      // Database notifications
+      const notifications = notificationsData.map(notification => ({
+        user_id: notification.user_id,
+        message: notification.message,
+        is_read: 0,
+        message_type: "member_request",
+        detail: JSON.stringify({
+          member_id: newUser.id,
+          member_name: newUser.full_name,
+          created_by: 'Website Self-Registration',
+          created_by_id: null,
+          member_type: member_type,
+          service_type: service_type || null,
+          mobile_number: newUser.mobile_1,
+          email: newUser.email,
+          created_at: newUser.created_at,
+          registration_source: 'website'
+        }),
+        photo: "bell-icon.webp"
+      }));
+
+      await Notification.bulkCreate(notifications);
+
+      // Push notifications to admins (non-blocking)
+      const pushPromises = notificationsData.map(async (notification) => {
+        try {
+          const result = await sendPushToUser({
+            userId: notification.user_id,
+            title: notification.push_title || "🔔 New Member Registration",
+            body: notification.push_body,
+            click_action: "https://edigacommunity.innogenx.co.in/dashboard/approvals",
+            icon: "https://edigacommunity.innogenx.co.in/logo.webp",
+            data: {
+              type: "member_approval_request",
+              member_id: String(newUser.id),
+              member_name: String(newUser.full_name),
+              requested_by: 'Website Registration',
+              member_type: member_type,
+              registration_source: 'website',
+              timestamp: String(new Date().toISOString())
+            }
+          });
+          return result;
+        } catch (error) {
+          console.error(`❌ Push error for admin ${notification.user_id}:`, error.message);
+          return { success: false, error: error.message };
+        }
+      });
+
+      Promise.allSettled(pushPromises);
+    }
+
+    // Response
     return res.status(201).json({
       success: true,
-      message: "User registered successfully",
+      message: `Thank you for registering as ${memberTypeText}. Your application has been submitted and is pending admin approval. You will be notified once approved.`,
       user: formatUserResponse(newUser),
+      needs_approval: true,
+      notifications_sent: notificationsData.length
     });
+
   } catch (error) {
     console.error("Signup error:", error);
     return res.status(500).json({
@@ -207,6 +364,8 @@ export const signup = async (req, res) => {
     });
   }
 };
+
+
 
 // =========================
 // SIGNIN / LOGIN
@@ -307,61 +466,74 @@ export const signin = async (req, res) => {
   }
 };
 
-// =========================
-// GET ALL USERS (with filters)
-// =========================
+// controllers/userController.js (partial – only the updated getAllUsers)
 export const getAllUsers = async (req, res) => {
   try {
-    let {
-      page = 1,
-      limit = 10,
-      status,
-      is_active,
-      category,
+    const {
       district,
-      booth_no,
-      service_type, // Added new filter
-      search
+      member_type, // can be string or comma-separated list
+      search,
     } = req.query;
 
-    page = Number(page);
-    limit = Number(limit);
-    const offset = (page - 1) * limit;
+    const whereConditions = {
+      status: "approved",
+      is_active: 1,
+      // ✅ EXCLUDE admin users
+      member_type: { [Op.ne]: 'admin' }, // Not equal to 'admin'
+    };
 
-    // Build where conditions
-    const whereConditions = {};
+    // District – partial match
+    if (district && district.trim() !== "") {
+      whereConditions.district = { [Op.like]: `%${district}%` };
+    }
 
-    if (status) whereConditions.status = status;
-    if (is_active !== undefined) whereConditions.is_active = is_active === 'true';
-    if (category) whereConditions.category = category;
-    if (district) whereConditions.district = district;
-    if (booth_no) whereConditions.booth_no = booth_no;
-    if (service_type) whereConditions.service_type = service_type; // Added new filter
+    // Member Type – support multiple values (overwrites the exclude condition if specified)
+    if (member_type && member_type.trim() !== "" && member_type !== "all") {
+      let typesArray = [];
+      if (member_type.includes(",")) {
+        typesArray = member_type.split(",").map(t => t.trim());
+      } else {
+        typesArray = [member_type.trim()];
+      }
+      // Remove empty values
+      typesArray = typesArray.filter(t => t !== "");
+      
+      if (typesArray.length > 0) {
+        // If 'admin' is explicitly requested, we need to handle it differently
+        if (typesArray.includes('admin')) {
+          // If admin is requested, remove the exclusion
+          delete whereConditions.member_type;
+          whereConditions.member_type = { [Op.in]: typesArray };
+        } else {
+          // Otherwise, keep the exclusion and add the filter
+          whereConditions.member_type = { 
+            [Op.and]: [
+              { [Op.ne]: 'admin' },
+              { [Op.in]: typesArray }
+            ]
+          };
+        }
+      }
+    }
 
-    if (search) {
+    // Search by name or mobile
+    if (search && search.trim() !== "") {
       whereConditions[Op.or] = [
         { full_name: { [Op.like]: `%${search}%` } },
-        { email: { [Op.like]: `%${search}%` } },
         { mobile_1: { [Op.like]: `%${search}%` } },
-        { voter_id: { [Op.like]: `%${search}%` } }
       ];
     }
 
-    const { count, rows } = await User.findAndCountAll({
+    const users = await User.findAll({
       where: whereConditions,
-      limit,
-      offset,
-      order: [["created_at", "DESC"]],
+      order: [["full_name", "ASC"]],
     });
 
-    const formattedUsers = rows.map(user => formatUserResponse(user));
+    const formattedUsers = users.map(formatUserResponse);
 
     return res.status(200).json({
       success: true,
-      total: count,
-      page,
-      limit,
-      totalPages: Math.ceil(count / limit),
+      total: formattedUsers.length,
       data: formattedUsers,
     });
   } catch (error) {
@@ -375,51 +547,160 @@ export const getAllUsers = async (req, res) => {
 };
 
 // =========================
-// GET ALL PENDING USERS (excluding admin)
+// GET ALL PENDING USERS
 // =========================
 export const getAllPendingUsers = async (req, res) => {
   try {
-    let { page = 1, limit = 10, member_type, service_type, search } = req.query; // Added service_type
+    let {
+      page = 1,
+      limit = 10,
+      member_type,
+      service_type,
+      search
+    } = req.query;
 
     page = Number(page);
     limit = Number(limit);
     const offset = (page - 1) * limit;
 
-    // Build where conditions for pending users
+    const loginUserId = req.user.id;
+    const loginRoleName = req.user.member_type;
+
+    // Base condition
     const whereConditions = {
-      status: 'pending',
-      member_type: {
-        [Op.ne]: 'admin' // Exclude admin users
-      }
+      status: "pending"
     };
 
-    // Filter by specific member type if provided
-    if (member_type && ['member', 'professional_volunteer', 'volunteer_member'].includes(member_type)) {
-      whereConditions.member_type = member_type;
+    // =========================
+    // ROLE BASED ACCESS
+    // =========================
+    if (loginRoleName === "admin") {
+      // Admin can see all pending users except admin
+      whereConditions.member_type = {
+        [Op.ne]: "admin"
+      };
+    }
+    else if (loginRoleName === "professional_volunteer") {
+
+      // Get volunteer members under this professional volunteer
+      const volunteerMembers = await User.findAll({
+        where: {
+          member_type: "volunteer_member",
+          superior_id: loginUserId
+        },
+        attributes: ["id"]
+      });
+
+      const volunteerMemberIds = volunteerMembers.map(vm => vm.id);
+
+      whereConditions.member_type = {
+        [Op.in]: ["member", "volunteer_member"]
+      };
+
+      whereConditions[Op.or] = [
+        // Volunteer members directly assigned to Professional Volunteer
+        {
+          superior_id: loginUserId
+        },
+
+        // Members created by Volunteer Members
+        {
+          superior_id: {
+            [Op.in]: volunteerMemberIds.length > 0
+              ? volunteerMemberIds
+              : [0]
+          }
+        }
+      ];
+    }
+    else {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view pending users",
+      });
     }
 
-    // Filter by service type for volunteer members
+    // =========================
+    // FILTERS
+    // =========================
+
+    if (
+      member_type &&
+      ["member", "professional_volunteer", "volunteer_member"].includes(member_type)
+    ) {
+      if (loginRoleName === "admin") {
+        whereConditions.member_type = member_type;
+      } else if (
+        loginRoleName === "professional_volunteer" &&
+        ["member", "volunteer_member"].includes(member_type)
+      ) {
+        whereConditions.member_type = member_type;
+      }
+    }
+
     if (service_type) {
       whereConditions.service_type = service_type;
     }
 
-    // Search functionality
+    // =========================
+    // SEARCH
+    // =========================
+
     if (search) {
-      whereConditions[Op.or] = [
-        { full_name: { [Op.like]: `%${search}%` } },
-        { email: { [Op.like]: `%${search}%` } },
-        { mobile_1: { [Op.like]: `%${search}%` } },
-        { profession: { [Op.like]: `%${search}%` } },
-        { organization: { [Op.like]: `%${search}%` } }
-      ];
+      whereConditions[Op.and] = whereConditions[Op.and] || [];
+
+      whereConditions[Op.and].push({
+        [Op.or]: [
+          {
+            full_name: {
+              [Op.like]: `%${search}%`,
+            },
+          },
+          {
+            email: {
+              [Op.like]: `%${search}%`,
+            },
+          },
+          {
+            mobile_1: {
+              [Op.like]: `%${search}%`,
+            },
+          },
+          {
+            profession: {
+              [Op.like]: `%${search}%`,
+            },
+          },
+          {
+            organization: {
+              [Op.like]: `%${search}%`,
+            },
+          },
+        ],
+      });
     }
 
     const { count, rows } = await User.findAndCountAll({
       where: whereConditions,
+      include: [
+        {
+          model: User,
+          as: "superior",
+          attributes: [
+            "id",
+            "full_name",
+            "member_type",
+
+          ],
+          required: false
+        }
+      ],
       limit,
       offset,
       order: [["created_at", "DESC"]],
-      attributes: { exclude: ['password'] }
+      attributes: {
+        exclude: ["password"],
+      },
     });
 
     const formatted = rows.map((user) => ({
@@ -427,12 +708,13 @@ export const getAllPendingUsers = async (req, res) => {
       full_name: user.full_name,
       parents_name: user.parents_name,
       member_type: user.member_type,
+      superior_id: user.superior_id,
       category: user.category,
       blood_group: user.blood_group,
       date_of_birth: user.date_of_birth,
       age: user.age,
       years_of_experience: user.years_of_experience,
-      service_type: user.service_type, // Added new field
+      service_type: user.service_type,
       voter_id: user.voter_id,
       aadhaar_number: user.aadhaar_number,
       organization: user.organization,
@@ -459,6 +741,15 @@ export const getAllPendingUsers = async (req, res) => {
       photo: user.photo,
       created_at: user.created_at,
       updated_at: user.updated_at,
+      superior_details: user.superior
+        ? {
+          id: user.superior.id,
+          full_name: user.superior.full_name,
+          member_type: user.superior.member_type,
+          mobile_1: user.superior.mobile_1,
+          email: user.superior.email
+        }
+        : null,
     }));
 
     return res.status(200).json({
@@ -469,8 +760,10 @@ export const getAllPendingUsers = async (req, res) => {
       totalPages: Math.ceil(count / limit),
       data: formatted,
     });
+
   } catch (error) {
     console.error("Error fetching pending users:", error);
+
     return res.status(500).json({
       success: false,
       message: "Error fetching pending users",
@@ -478,6 +771,8 @@ export const getAllPendingUsers = async (req, res) => {
     });
   }
 };
+
+
 
 // =========================
 // GET ALL APPROVED MEMBERS (member_type = 'member')
@@ -490,11 +785,58 @@ export const getAllMembers = async (req, res) => {
     limit = Number(limit);
     const offset = (page - 1) * limit;
 
-    // Build where conditions for regular members
+
+    const loginUserId = req.user.id;
+    const loginRoleName = req.user.member_type;
+
     const whereConditions = {
       member_type: 'member',
-      status: 'approved'
     };
+
+    // Admin can see all approved members
+    if (loginRoleName === 'admin') {
+            whereConditions.status = 'approved';
+
+
+    } else if (loginRoleName === 'professional_volunteer') {
+
+      // Get volunteer members under this professional volunteer
+      const volunteerMembers = await User.findAll({
+        where: {
+          member_type: 'volunteer_member',
+          superior_id: loginUserId
+        },
+        attributes: ['id']
+      });
+
+      const volunteerMemberIds = volunteerMembers.map(vm => vm.id);
+
+      whereConditions[Op.or] = [
+        // Members directly under professional volunteer
+        {
+          superior_id: loginUserId
+        },
+
+        // Members created by volunteer members
+        {
+          superior_id: {
+            [Op.in]: volunteerMemberIds.length > 0
+              ? volunteerMemberIds
+              : [0]
+          }
+        }
+      ];
+
+    } else if (loginRoleName === 'volunteer_member') {
+
+      // Volunteer member sees only members created by them
+      whereConditions.superior_id = loginUserId;
+
+    } else {
+
+      // Member role can only see themselves or no records
+      whereConditions.superior_id = loginUserId;
+    }
 
     // Additional filters
     if (category) whereConditions.category = category;
@@ -513,6 +855,14 @@ export const getAllMembers = async (req, res) => {
 
     const { count, rows } = await User.findAndCountAll({
       where: whereConditions,
+      include: [
+        {
+          model: User,
+          as: "superior",
+          attributes: ["id", "full_name", "member_type"],
+          required: false
+        }
+      ],
       limit,
       offset,
       order: [["created_at", "DESC"]],
@@ -557,6 +907,14 @@ export const getAllMembers = async (req, res) => {
       last_login: user.last_login,
       created_at: user.created_at,
       updated_at: user.updated_at,
+      superior_details: user.superior
+        ? {
+          id: user.superior.id,
+          full_name: user.superior.full_name,
+          member_type: user.superior.member_type,
+
+        }
+        : null,
     }));
 
     return res.status(200).json({
@@ -588,11 +946,22 @@ export const getAllVolunteerMembers = async (req, res) => {
     limit = Number(limit);
     const offset = (page - 1) * limit;
 
-    // Build where conditions for volunteer members
+
+    const loginUserId = req.user.id;
+    const loginRoleName = req.user.member_type;
+
     const whereConditions = {
       member_type: 'volunteer_member',
-      status: 'approved'
     };
+
+    // Admin can see all approved members
+    if (loginRoleName === 'admin') {
+      whereConditions.status = 'approved';
+    } else {
+      // Other roles can see only their own members
+      whereConditions.superior_id = loginUserId;
+    }
+
 
     // Additional filters
     if (category) whereConditions.category = category;
@@ -612,6 +981,18 @@ export const getAllVolunteerMembers = async (req, res) => {
 
     const { count, rows } = await User.findAndCountAll({
       where: whereConditions,
+      include: [
+        {
+          model: User,
+          as: "superior",
+          attributes: [
+            "id",
+            "full_name",
+            "member_type",
+          ],
+          required: false
+        }
+      ],
       limit,
       offset,
       order: [["created_at", "DESC"]],
@@ -656,6 +1037,15 @@ export const getAllVolunteerMembers = async (req, res) => {
       last_login: user.last_login,
       created_at: user.created_at,
       updated_at: user.updated_at,
+      superior_details: user.superior
+        ? {
+          id: user.superior.id,
+          full_name: user.superior.full_name,
+          member_type: user.superior.member_type,
+          mobile_1: user.superior.mobile_1,
+          email: user.superior.email
+        }
+        : null,
     }));
 
     return res.status(200).json({
@@ -829,7 +1219,7 @@ export const getActiveProfessionalVolunteers = async (req, res) => {
     };
 
     const allowedCategories = categoryMapping[issue_type] || [];
-    
+
 
 
     // IMPORTANT FIX: Filter by category AND profession
@@ -861,19 +1251,19 @@ export const getActiveProfessionalVolunteers = async (req, res) => {
     };
 
     const professionKeywordsList = professionKeywords[issue_type] || [];
-    
+
     if (professionKeywordsList.length > 0) {
       // Add profession filter as well for stricter matching
       const professionConditions = professionKeywordsList.map(keyword => ({
         profession: { [Op.like]: `%${keyword}%` }
       }));
-      
+
       // Combine category and profession filters
       whereConditions[Op.and] = [
         { category: { [Op.in]: allowedCategories } },
         { [Op.or]: professionConditions }
       ];
-      
+
       // Remove the direct category filter since we're using Op.and
       delete whereConditions.category;
     }
@@ -895,7 +1285,7 @@ export const getActiveProfessionalVolunteers = async (req, res) => {
           { state: { [Op.like]: `%${location}%` } }
         ]
       };
-      
+
       if (whereConditions[Op.and]) {
         whereConditions[Op.and].push(locationCondition);
       } else {
@@ -912,7 +1302,7 @@ export const getActiveProfessionalVolunteers = async (req, res) => {
           { profession: { [Op.like]: `%${search}%` } }
         ]
       };
-      
+
       if (whereConditions[Op.and]) {
         whereConditions[Op.and].push(searchCondition);
       } else {
@@ -988,6 +1378,280 @@ export const getActiveProfessionalVolunteers = async (req, res) => {
     });
   }
 };
+
+
+
+
+// =========================
+// GET ACTIVE VOLUNTEER MEMBERS (with issue type and service type filtering)
+// =========================
+export const getActiveVolunteerMembers = async (req, res) => {
+  try {
+    let { issue_type, category, location, search, min_experience, max_experience, service_type } = req.query;
+    const loginUserId = req.user.id;
+
+    // Handle issue_type if it's an array (from multiple query params)
+    if (Array.isArray(issue_type)) {
+      const uniqueIssues = [...new Set(issue_type.filter(Boolean))];
+      issue_type = uniqueIssues[0] || null;
+    }
+
+    // Handle service_type if it's an array
+    if (Array.isArray(service_type)) {
+      const uniqueServices = [...new Set(service_type.filter(Boolean))];
+      service_type = uniqueServices;
+    }
+
+    // First, get all user IDs where superior_id = loginUserId
+    const subordinates = await User.findAll({
+      where: {
+        superior_id: loginUserId,
+        is_active: true,
+        member_type: "volunteer_member",
+        status: "approved"
+      },
+      attributes: ['id']
+    });
+
+    const subordinateIds = subordinates.map(sub => sub.id);
+
+    if (subordinateIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        message: "No volunteers assigned to you",
+        filters: { issue_type, category, location, search, min_experience, max_experience, service_type },
+        data: []
+      });
+    }
+
+    // Build where conditions
+    const whereConditions = {
+      id: {
+        [Op.in]: subordinateIds  // Only show volunteers where superior_id = loginUserId
+      },
+      is_active: true,
+      member_type: "volunteer_member",
+      status: "approved"
+    };
+
+    // STRICT FILTERING - Required field for volunteers
+    if (!issue_type || !issue_type.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "issue_type is required",
+        data: []
+      });
+    }
+
+    // UPDATED MAPPING - Based on your actual database values
+    const categoryMapping = {
+      'Medical Facility': ['Healthcare', 'Medical', 'General'],
+      'Medical Camp': ['Healthcare', 'Medical Camps', 'General'],
+      'Healthcare': ['Healthcare', 'Medical', 'General'],
+      'Legal Aid': ['Legal Aid', 'Legal', 'Retired Bank Officer'],
+      'Legal Awareness': ['Legal Aid', 'Legal', 'Retired Bank Officer'],
+      'Education': ['Education', 'Student', 'Teaching', 'Homemaker'],
+      'Digital Literacy': ['IT', 'Technology', 'Student'],
+      'Financial Literacy': ['Finance', 'Banking', 'Retired Bank Officer', 'Small Business Owner'],
+      'Housing': ['Housing', 'Small Business Owner', 'General'],
+      'Women Empowerment': ['Social Worker', 'Social Service', 'Homemaker'],
+      'Senior Citizens': ['Old Age Care', 'Social Service', 'Retired Bank Officer'],
+      'Environment': ['Social Service', 'General'],
+      'Business Development': ['Small Business Owner', 'Business', 'General'],
+      'Agriculture': ['Agriculture', 'Farming', 'General'],
+      'Community Service': ['Social Service', 'Social Worker', 'General'],
+      'Infrastructure': ['Infrastructure', 'General'],
+      'Public Safety': ['Safety', 'Security', 'General'],
+      'Blood Donation': ['Healthcare', 'Medical', 'General']
+    };
+
+    const allowedCategories = categoryMapping[issue_type] || [];
+
+    if (allowedCategories.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid issue_type provided",
+        data: []
+      });
+    }
+
+    // Filter by category
+    whereConditions.category = {
+      [Op.in]: allowedCategories
+    };
+
+    // =========================
+    // SERVICE TYPE FILTERING (Optional - only if provided)
+    // =========================
+    if (service_type && service_type.length > 0) {
+      const serviceTypeArray = Array.isArray(service_type) ? service_type : [service_type];
+      
+      const serviceConditions = serviceTypeArray.map(service => ({
+        service_type: { [Op.like]: `%${service}%` }
+      }));
+      
+      if (whereConditions[Op.and]) {
+        whereConditions[Op.and].push({ [Op.or]: serviceConditions });
+      } else {
+        whereConditions[Op.and] = [{ [Op.or]: serviceConditions }];
+      }
+    }
+
+    // Additional filters
+    if (category && category.trim()) {
+      if (whereConditions[Op.and]) {
+        whereConditions[Op.and].push({ category: { [Op.like]: `%${category}%` } });
+      } else {
+        whereConditions.category = { [Op.like]: `%${category}%` };
+      }
+    }
+
+    if (location && location.trim()) {
+      const locationCondition = {
+        [Op.or]: [
+          { city: { [Op.like]: `%${location}%` } },
+          { district: { [Op.like]: `%${location}%` } },
+          { state: { [Op.like]: `%${location}%` } }
+        ]
+      };
+
+      if (whereConditions[Op.and]) {
+        whereConditions[Op.and].push(locationCondition);
+      } else {
+        whereConditions[Op.and] = [locationCondition];
+      }
+    }
+
+    if (search && search.trim()) {
+      const searchCondition = {
+        [Op.or]: [
+          { full_name: { [Op.like]: `%${search}%` } },
+          { email: { [Op.like]: `%${search}%` } },
+          { mobile_1: { [Op.like]: `%${search}%` } },
+          { profession: { [Op.like]: `%${search}%` } }
+        ]
+      };
+
+      if (whereConditions[Op.and]) {
+        whereConditions[Op.and].push(searchCondition);
+      } else {
+        whereConditions[Op.and] = [searchCondition];
+      }
+    }
+
+    if (min_experience || max_experience) {
+      const experienceCondition = {};
+      if (min_experience) experienceCondition[Op.gte] = parseInt(min_experience);
+      if (max_experience) experienceCondition[Op.lte] = parseInt(max_experience);
+      whereConditions.years_of_experience = experienceCondition;
+    }
+
+    console.log("Executing query for user:", loginUserId);
+    console.log("Subordinate IDs:", subordinateIds);
+    console.log("Query conditions:", JSON.stringify(whereConditions, null, 2));
+
+    // Execute query
+    const users = await User.findAll({
+      where: whereConditions,
+      attributes: [
+        'id',
+        'full_name',
+        'parents_name',
+        'member_type',
+        'category',
+        'service_type',
+        'blood_group',
+        'date_of_birth',
+        'age',
+        'years_of_experience',
+        'organization',
+        'profession',
+        'business_description',
+        'address',
+        'booth_no',
+        'taluk_zone',
+        'city',
+        'district',
+        'state',
+        'pin_code',
+        'ls_sabha',
+        'vs_sabha',
+        'mobile_1',
+        'mobile_2',
+        'phone_1',
+        'phone_2',
+        'email',
+        'status',
+        'is_active',
+        'remark',
+        'document_file',
+        'photo',
+        'created_at',
+        'updated_at',
+        'superior_id'  // Include superior_id in response for verification
+      ],
+      order: [
+        ['years_of_experience', 'DESC'],
+        ['full_name', 'ASC']
+      ],
+    });
+
+    // Format response
+    const formatted = users.map((user) => ({
+      id: user.id,
+      full_name: user.full_name,
+      parents_name: user.parents_name,
+      member_type: user.member_type,
+      category: user.category || 'N/A',
+      service_type: user.service_type || 'N/A',
+      blood_group: user.blood_group,
+      date_of_birth: user.date_of_birth,
+      age: user.age,
+      years_of_experience: user.years_of_experience,
+      organization: user.organization,
+      profession: user.profession,
+      business_description: user.business_description,
+      address: user.address,
+      booth_no: user.booth_no,
+      taluk_zone: user.taluk_zone,
+      city: user.city,
+      district: user.district,
+      state: user.state,
+      pin_code: user.pin_code,
+      ls_sabha: user.ls_sabha,
+      vs_sabha: user.vs_sabha,
+      mobile_1: user.mobile_1,
+      mobile_2: user.mobile_2,
+      phone_1: user.phone_1,
+      phone_2: user.phone_2,
+      email: user.email,
+      status: user.status,
+      is_active: user.is_active,
+      remark: user.remark,
+      document_file: user.document_file,
+      photo: user.photo,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+      superior_id: user.superior_id
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: formatted.length,
+      filters: { issue_type, category, location, search, min_experience, max_experience, service_type },
+      data: formatted,
+    });
+  } catch (error) {
+    console.error("Error fetching volunteer members:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching volunteer members",
+      error: error.message,
+    });
+  }
+};
+
 
 // =========================
 // GET ACTIVE USERS
@@ -1090,6 +1754,7 @@ export const getUserById = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
+
     const user = await User.findByPk(id);
 
     if (!user) {
@@ -1101,21 +1766,33 @@ export const updateUser = async (req, res) => {
 
     const updateData = { ...req.body };
 
-    // Validate service_type for volunteer members
-    if (updateData.member_type === 'volunteer_member' && updateData.service_type === '') {
+    // Prevent member_id update
+    delete updateData.member_id;
+
+    // Validate service type
+    if (
+      updateData.member_type === "volunteer_member" &&
+      updateData.service_type === ""
+    ) {
       return res.status(400).json({
         success: false,
         message: "Service type is required for volunteer members",
       });
     }
 
-    // If updating to non-volunteer member, clear service_type
-    if (updateData.member_type && updateData.member_type !== 'volunteer_member') {
+    // Clear service_type for non-volunteer members
+    if (
+      updateData.member_type &&
+      updateData.member_type !== "volunteer_member"
+    ) {
       updateData.service_type = null;
     }
 
-    // Parse address if it's a string
-    if (updateData.address && typeof updateData.address === 'string') {
+    // Parse address JSON
+    if (
+      updateData.address &&
+      typeof updateData.address === "string"
+    ) {
       try {
         updateData.address = JSON.parse(updateData.address);
       } catch (error) {
@@ -1124,55 +1801,76 @@ export const updateUser = async (req, res) => {
       }
     }
 
-    // IMPORTANT: Validate is_active based on status
+    // Auto status handling
     if (updateData.is_active !== undefined) {
-      const isActive = updateData.is_active === true || updateData.is_active === 1 || updateData.is_active === '1';
-      
-      if (isActive && updateData.status !== 'approved') {
-        updateData.status = 'approved';
-        console.log(`Auto-setting status to approved for user ${id} because is_active is set to true`);
-      } else if (!isActive && updateData.status === 'approved') {
-        console.log(`User ${id} is being deactivated while status is approved`);
+      const isActive =
+        updateData.is_active === true ||
+        updateData.is_active === 1 ||
+        updateData.is_active === "1";
+
+      if (isActive && updateData.status !== "approved") {
+        updateData.status = "approved";
       }
     }
 
-    // Handle password update separately
+    // Password update
     if (updateData.password) {
-      updateData.password = await bcrypt.hash(updateData.password, 10);
+      updateData.password = await bcrypt.hash(
+        updateData.password,
+        10
+      );
     } else {
       delete updateData.password;
     }
 
-    // Handle file uploads
+    // File uploads
     if (req.files) {
       if (req.files.document_file) {
-        updateData.document_file = req.files.document_file[0].filename;
+        updateData.document_file =
+          req.files.document_file[0].filename;
       }
+
       if (req.files.photo) {
-        updateData.photo = req.files.photo[0].filename;
+        updateData.photo =
+          req.files.photo[0].filename;
+      }
+
+      if (req.files.aadhaar_photo) {
+        updateData.aadhaar_photo =
+          req.files.aadhaar_photo[0].filename;
+      }
+
+      if (req.files.voter_photo) {
+        updateData.voter_photo =
+          req.files.voter_photo[0].filename;
       }
     }
 
-    // Auto-calculate age if date_of_birth is updated
-    if (updateData.date_of_birth && !updateData.age) {
-      updateData.age = calculateAge(updateData.date_of_birth);
+    // Auto calculate age
+    if (
+      updateData.date_of_birth &&
+      !updateData.age
+    ) {
+      updateData.age = calculateAge(
+        updateData.date_of_birth
+      );
     }
 
     updateData.updated_at = new Date();
 
     await user.update(updateData);
 
-    // Fetch updated user to return latest data
     const updatedUser = await User.findByPk(id);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "User updated successfully",
-      data: formatUserResponse(updatedUser)
+      data: formatUserResponse(updatedUser),
     });
   } catch (error) {
     console.error("Error updating user:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Error updating user",
       error: error.message,
@@ -1185,17 +1883,28 @@ export const updateUser = async (req, res) => {
 // =========================
 export const updateUserStatus = async (req, res) => {
   try {
+
     const { id } = req.params;
     const { status, remark } = req.body;
 
-    if (!status || !['pending', 'approved', 'rejected'].includes(status)) {
+    // =========================
+    // VALIDATION
+    // =========================
+    if (
+      !status ||
+      !["pending", "approved", "rejected"].includes(status)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Valid status (pending/approved/rejected) is required"
       });
     }
 
+    // =========================
+    // FIND USER
+    // =========================
     const user = await User.findByPk(id);
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -1203,7 +1912,10 @@ export const updateUserStatus = async (req, res) => {
       });
     }
 
-    const isActive = status === 'approved' ? true : false;
+    // =========================
+    // UPDATE STATUS
+    // =========================
+    const isActive = status === "approved";
 
     await user.update({
       status,
@@ -1212,13 +1924,393 @@ export const updateUserStatus = async (req, res) => {
       updated_at: new Date()
     });
 
+    // =========================
+    // NOTIFICATION MESSAGE
+    // =========================
+    let notificationMessage = "";
+    let notificationMessage1 = "";
+
+    let emailSubject = "";
+    let emailHtml = "";
+
+    if (status === "approved") {
+      notificationMessage = `Dear ${user.full_name}, Great news! Your registration request has been APPROVED. You can now login to your account using your registered email and password at https://edigacommunity.innogenx.co.in/login`;
+      notificationMessage1 = `Dear ${user.full_name}, Great news! Your registration request has been APPROVED.`;
+
+      emailSubject = "🎉 Registration Approved - Welcome to Ediga Community!";
+
+      emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                    border-radius: 10px 10px 0 0;
+                }
+                .content {
+                    background: #f9fafb;
+                    padding: 30px;
+                    border-radius: 0 0 10px 10px;
+                    border: 1px solid #e5e7eb;
+                    border-top: none;
+                }
+                .credentials {
+                    background: white;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    border-left: 4px solid #10b981;
+                }
+                .button {
+                    display: inline-block;
+                    background: #10b981;
+                    color: white;
+                    padding: 12px 24px;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    margin: 20px 0;
+                }
+                .notes {
+                    background: #fef3c7;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    border-left: 4px solid #f59e0b;
+                }
+                .footer {
+                    text-align: center;
+                    margin-top: 20px;
+                    font-size: 12px;
+                    color: #6b7280;
+                }
+                .highlight {
+                    color: #10b981;
+                    font-weight: bold;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Account Approved! 🎉</h1>
+                <p>Welcome to Ediga Community</p>
+            </div>
+            
+            <div class="content">
+                <p>Dear <strong>${user.full_name}</strong>,</p>
+                
+                <p>Great news! Your registration request has been <strong class="highlight">APPROVED</strong> by the admin. 🎉</p>
+                
+                <p>You can now log in to your account and start exploring the Ediga Community platform.</p>
+                
+                <div class="credentials">
+                    <h3 style="margin-top: 0;">🔐 Your Login Credentials:</h3>
+                    <p><strong>📧 Email:</strong> ${user.email}</p>
+                    <p><strong>🔑 Password:</strong> The password you set during registration</p>
+                </div>
+                
+                <center>
+                    <a href="https://edigacommunity.innogenx.co.in/login" class="button">
+                        🔐 Click Here to Login
+                    </a>
+                </center>
+                
+                <p><strong>🌐 Login Link:</strong><br>
+                <code style="background: #f3f4f6; padding: 8px; display: block; word-break: break-all; border-radius: 4px;">
+                    https://edigacommunity.innogenx.co.in/login
+                </code>
+                </p>
+                
+                <div class="notes">
+                    <h3 style="margin-top: 0;">⚠️ Important Notes:</h3>
+                    <ul style="margin-bottom: 0;">
+                        <li>Keep your credentials safe and secure</li>
+                        <li>You can change your password after logging in</li>
+                        <li>For any login issues, please contact support</li>
+                    </ul>
+                </div>
+                
+                <p>Thank you for joining Ediga Community! We're excited to have you onboard.</p>
+                
+                <p>Best regards,<br>
+                <strong>Ediga Community Team</strong></p>
+            </div>
+            
+            <div class="footer">
+                <p>© 2025 Ediga Community. All rights reserved.</p>
+                <p>This is an automated message, please do not reply.</p>
+            </div>
+        </body>
+        </html>
+      `;
+
+    } else if (status === "rejected") {
+      notificationMessage = `Dear ${user.full_name}, We regret to inform you that your registration request has been rejected. ${remark ? `Reason: ${remark}` : 'Please contact support for more information.'} You can re-apply after addressing the issues or contact our support team for assistance.`;
+
+      emailSubject = "Registration Status Update - Ediga Community";
+
+      emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                .header {
+                    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                    border-radius: 10px 10px 0 0;
+                }
+                .content {
+                    background: #f9fafb;
+                    padding: 30px;
+                    border-radius: 0 0 10px 10px;
+                    border: 1px solid #e5e7eb;
+                    border-top: none;
+                }
+                .remark {
+                    background: white;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    border-left: 4px solid #ef4444;
+                }
+                .next-steps {
+                    background: #e0f2fe;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    border-left: 4px solid #0284c7;
+                }
+                .button {
+                    display: inline-block;
+                    background: #3b82f6;
+                    color: white;
+                    padding: 12px 24px;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    margin: 20px 0;
+                }
+                .support {
+                    background: #f3f4f6;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    text-align: center;
+                }
+                .footer {
+                    text-align: center;
+                    margin-top: 20px;
+                    font-size: 12px;
+                    color: #6b7280;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Registration Update</h1>
+                <p>Application Status: Rejected</p>
+            </div>
+            
+            <div class="content">
+                <p>Dear <strong>${user.full_name}</strong>,</p>
+                
+                <p>Thank you for your interest in joining <strong>Ediga Community</strong>. After careful review of your application, we regret to inform you that your registration request has been <strong style="color: #ef4444;">REJECTED</strong> at this time.</p>
+                
+                ${remark ? `
+                <div class="remark">
+                    <h3 style="margin-top: 0;">📝 Reason for Rejection:</h3>
+                    <p style="margin-bottom: 0; font-size: 14px;">${remark}</p>
+                </div>
+                ` : `
+                <div class="remark">
+                    <h3 style="margin-top: 0;">📝 Reason for Rejection:</h3>
+                    <p style="margin-bottom: 0; font-size: 14px;">Your application did not meet the eligibility criteria or required documentation was incomplete.</p>
+                </div>
+                `}
+                
+                <div class="next-steps">
+                    <h3 style="margin-top: 0;">🔄 Next Steps You Can Take:</h3>
+                    <ul style="margin-bottom: 0;">
+                        <li>Review the reason for rejection mentioned above</li>
+                        <li>Update your information and documentation</li>
+                        <li>Contact our support team for clarification</li>
+                    </ul>
+                </div>
+                
+                <div class="support">
+                    <h3 style="margin-top: 0;">📞 Need Help?</h3>
+                    <p>If you believe this decision was made in error or need assistance with your application, please don't hesitate to contact our support team.</p>
+                    <p><strong>Email:</strong> support@edigacommunity.org<br>
+                    <strong>Phone:</strong> +91 XXXXXXXXXX</p>
+                </div>
+                
+                <center>
+                    <a href="https://edigacommunity.innogenx.co.in/register" class="button">
+                        🔄 Re-apply for Registration
+                    </a>
+                </center>
+                
+                <hr style="margin: 20px 0;">
+                
+                <p><strong>Important Information:</strong></p>
+                <ul>
+                    <li>You can re-apply at any time with updated information</li>
+                    <li>Previous application data has been saved for reference</li>
+                    <li>Contact support within 30 days if you need clarification</li>
+                </ul>
+                
+                <p>We appreciate your interest in joining our community and encourage you to address the mentioned issues and re-apply.</p>
+                
+                <p>Best regards,<br>
+                <strong>Ediga Community Team</strong></p>
+            </div>
+            
+            <div class="footer">
+                <p>© 2025 Ediga Community. All rights reserved.</p>
+                <p>This is an automated message, please do not reply directly to this email.</p>
+                <p>For assistance, please contact: support@edigacommunity.org</p>
+            </div>
+        </body>
+        </html>
+      `;
+
+    } else {
+      notificationMessage = `Dear ${user.full_name}, Your registration status has been updated to ${status}. Please check your dashboard for more details.`;
+
+      emailSubject = "Registration Status Updated - Ediga Community";
+
+      emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                .header {
+                    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                    border-radius: 10px 10px 0 0;
+                }
+                .content {
+                    background: #f9fafb;
+                    padding: 30px;
+                    border-radius: 0 0 10px 10px;
+                    border: 1px solid #e5e7eb;
+                    border-top: none;
+                }
+                .footer {
+                    text-align: center;
+                    margin-top: 20px;
+                    font-size: 12px;
+                    color: #6b7280;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Registration Status Updated</h1>
+            </div>
+            
+            <div class="content">
+                <p>Dear <strong>${user.full_name}</strong>,</p>
+                
+                <p>Your registration status has been updated to <strong>${status.toUpperCase()}</strong>.</p>
+                
+                <p>Please log in to your dashboard for more details.</p>
+                
+                <p>Best regards,<br>
+                <strong>Ediga Community Team</strong></p>
+            </div>
+            
+            <div class="footer">
+                <p>© 2025 Ediga Community. All rights reserved.</p>
+                <p>This is an automated message, please do not reply.</p>
+            </div>
+        </body>
+        </html>
+      `;
+    }
+
+    // =========================
+    // CREATE NOTIFICATION
+    // =========================
+    await Notification.create({
+      user_id: user.id,
+      message: notificationMessage1,
+      message_type: status === "approved" ? "registration_approved" : status,
+      is_read: 0,
+      detail: {
+        user_id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        status,
+        remark: remark || "",
+        login_url: "https://edigacommunity.innogenx.co.in/login",
+        reapply_url: "https://edigacommunity.innogenx.co.in/register",
+        support_email: "support@edigacommunity.org"
+      },
+      photo: "bell-icon.webp"
+    });
+
+    // =========================
+    // SEND EMAIL
+    // =========================
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: `"Ediga Community" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: emailSubject,
+      html: emailHtml
+    });
+
+    // =========================
+    // RESPONSE
+    // =========================
     res.status(200).json({
       success: true,
       message: `User ${status} successfully`,
-      data: formatUserResponse(user)
+      data: user
     });
+
   } catch (error) {
+
     console.error("Error updating user status:", error);
+
     res.status(500).json({
       success: false,
       message: "Error updating user status",
@@ -1226,6 +2318,7 @@ export const updateUserStatus = async (req, res) => {
     });
   }
 };
+
 
 // =========================
 // DELETE USER
@@ -1427,7 +2520,7 @@ export const getUserStats = async (req, res) => {
     // Statistics by service type for volunteer members
     const serviceTypeStats = await User.findAll({
       attributes: ['service_type', [db.Sequelize.fn('COUNT', db.Sequelize.col('id')), 'count']],
-      where: { 
+      where: {
         member_type: 'volunteer_member',
         service_type: { [Op.ne]: null }
       },

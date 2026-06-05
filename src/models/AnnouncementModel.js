@@ -1,6 +1,6 @@
 export default (sequelize, DataTypes) => {
-    const Broadcast = sequelize.define(
-        "Broadcast",
+    const Announcement = sequelize.define(
+        "Announcement",
         {
             id: {
                 type: DataTypes.INTEGER,
@@ -8,7 +8,7 @@ export default (sequelize, DataTypes) => {
                 primaryKey: true,
             },
 
-            broadcast_id: {
+            announcement_id: {
                 type: DataTypes.STRING(50),
                 allowNull: false,
                 unique: true,
@@ -23,7 +23,8 @@ export default (sequelize, DataTypes) => {
                 type: DataTypes.TEXT,
                 allowNull: false,
             },
-             image: {
+
+            file: {
                 type: DataTypes.STRING(255),
                 allowNull: true,
             },
@@ -36,7 +37,7 @@ export default (sequelize, DataTypes) => {
                         if (!Array.isArray(value)) {
                             throw new Error('Receiver must be an array');
                         }
-                        const validTypes = ['member', 'volunteer_member', 'professional_volunteer'];
+                        const validTypes = ['member', 'volunteer_member', 'professional_volunteer', 'admin'];
                         for (const type of value) {
                             if (!validTypes.includes(type)) {
                                 throw new Error(`Invalid receiver type: ${type}. Allowed: ${validTypes.join(', ')}`);
@@ -45,16 +46,13 @@ export default (sequelize, DataTypes) => {
                     }
                 }
             },
+
             target_user_ids: {
                 type: DataTypes.JSON,
                 allowNull: true,
                 defaultValue: null
             },
 
-            status: {
-                type: DataTypes.ENUM('draft', 'scheduled', 'sent', 'failed', 'cancelled'),
-                defaultValue: 'draft',
-            },
 
             created_at: {
                 type: DataTypes.DATE,
@@ -67,20 +65,15 @@ export default (sequelize, DataTypes) => {
             },
         },
         {
-            tableName: "broadcasts",
+            tableName: "announcements",
             timestamps: false,
+            hooks: {
+                beforeUpdate: (announcement) => {
+                    announcement.updated_at = new Date();
+                }
+            }
         }
     );
 
-    // Associations
-    Broadcast.associate = (models) => {
-        // Add any associations here if needed
-        // For example, if you want to track who created the broadcast
-        // Broadcast.belongsTo(models.User, {
-        //     foreignKey: "created_by",
-        //     as: "creator",
-        // });
-    };
-
-    return Broadcast;
+    return Announcement;
 };

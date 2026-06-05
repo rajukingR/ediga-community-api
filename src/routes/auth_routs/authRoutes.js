@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from "../../middlewares/authMiddleware.js";
-import upload from "../../middlewares/multer.js";
+import upload, { convertToWebp } from "../../middlewares/multer.js";
 
 import {
   signup,
@@ -14,6 +14,7 @@ import {
   getAllVolunteerMembers,
   getAllProfessionalVolunteers,
   getActiveProfessionalVolunteers,
+  getActiveVolunteerMembers,
   getActiveUsers,
   getUserById,
   updateUser,
@@ -27,8 +28,11 @@ router.post(
   '/signup',
   upload.fields([
     { name: 'photo', maxCount: 1 },
-    { name: 'document_file', maxCount: 1 }
+    { name: 'document_file', maxCount: 1 },
+    { name: 'aadhaar_photo', maxCount: 1 },
+    { name: 'voter_photo', maxCount: 1 }
   ]),
+  convertToWebp,
   signup
 );
 
@@ -50,15 +54,21 @@ router.get('/volunteer-members', authMiddleware, getAllVolunteerMembers);
 router.get('/professional-volunteers', authMiddleware, getAllProfessionalVolunteers);
 
 router.get("/professional-volunteers/active", authMiddleware, getActiveProfessionalVolunteers);
+router.get("/volunteer-members/active", authMiddleware, getActiveVolunteerMembers);
+
 router.get("/active", authMiddleware, getActiveUsers);
 router.patch('/:id/status', authMiddleware, updateUserStatus); // Add this route
 
 router.get('/:id', authMiddleware, getUserById);
 
-router.put('/:id', upload.fields([
-  { name: 'photo', maxCount: 1 },
-  { name: 'document_file', maxCount: 1 }
-]), authMiddleware, updateUser);
+router.put(
+  "/:id",
+  upload.fields([
+    { name: "photo", maxCount: 1 },
+    { name: "document_file", maxCount: 1 },
+    { name: "aadhaar_photo", maxCount: 1 },
+    { name: "voter_photo", maxCount: 1 }
+  ]), authMiddleware, convertToWebp, updateUser);
 
 router.delete('/:id', authMiddleware, deleteUser);
 

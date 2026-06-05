@@ -18,6 +18,9 @@ export default (sequelize, DataTypes) => {
         defaultValue: 'member',
         allowNull: false,
       },
+      superior_id: {
+        type: DataTypes.INTEGER,
+      },
       category: {
         type: DataTypes.STRING(50),
       },
@@ -128,6 +131,47 @@ export default (sequelize, DataTypes) => {
         allowNull: true,
         defaultValue: null,
       },
+
+      member_id: {
+        type: DataTypes.STRING(50),
+        unique: true,
+        allowNull: true,
+      },
+
+      email_2: {
+        type: DataTypes.STRING(150),
+        allowNull: true,
+      },
+
+      website: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+
+      aadhaar_photo: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+
+      voter_photo: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+
+      panchayat: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
+
+      ward: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
+
+      area: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
       created_at: {
         type: DataTypes.DATE,
       },
@@ -155,6 +199,11 @@ export default (sequelize, DataTypes) => {
       as: "issueStatuses",
     });
 
+    User.belongsTo(User, {
+      foreignKey: "superior_id",
+      as: "superior"
+    });
+
 
     // User belongs to many Issues through IssueMemberStatus (assigned issues)
     User.belongsToMany(models.Issue, {
@@ -162,6 +211,12 @@ export default (sequelize, DataTypes) => {
       foreignKey: "member_id",
       otherKey: "issue_id",
       as: "assignedIssues",
+    });
+
+    User.hasMany(models.WorkManagement, {
+      foreignKey: "assigned_by",
+      as: "assignedWorks",
+      sourceKey: "id"
     });
   };
 
