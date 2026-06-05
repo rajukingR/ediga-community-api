@@ -35,3 +35,5 @@ Thumbs.db  # Windows metadata
 docker-compose.override.yml
 .dockerignore
 
+# Firebase Service Account Key
+src/config/firebaseServiceKey.json
