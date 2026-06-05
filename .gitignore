@@ -37,3 +37,5 @@ docker-compose.override.yml
 
 # Firebase Service Account Key
 src/config/firebaseServiceKey.json
+
+firebaseServiceKey.json
