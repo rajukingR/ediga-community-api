@@ -1,7 +1,7 @@
 import express from 'express';
+import cors from 'cors'; // REMOVED:
 import path from 'path';
 import dotenv from 'dotenv';
-import cors from 'cors';
 import morgan from 'morgan';
 import helmet from 'helmet';
 import axios from 'axios';
@@ -9,9 +9,12 @@ import https from 'https';
 import db from './config/db.js';
 import authRoutes from './routes/auth_routs/authRoutes.js';
 import communityRoutes from "./routes/communityRoutes.js";
-import professionalMasterRoutes from "./routes/professionalMasterRoutes.js";
-import issueCategoryRoutes from "./routes/issueCategoryRoutes.js";
+import memberTypeRoutes from "./routes/memberTypeRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
+import subCategoryRoutes from "./routes/subCategoryRoutes.js";
+import professionRoutes from "./routes/professionRoutes.js";
+import specializationRoutes from "./routes/specializationRoutes.js";
+
 import issueRoutes from "./routes/issueRoutes.js";
 import broadcastRoutes from './routes/broadcastRoutes.js';
 import notificationRoutes from "./routes/notificationRoutes.js";
@@ -20,6 +23,7 @@ import fcmRoutes from "./routes/fcmRoutes.js";
 import firebaseOtpRoutes from "./routes/firebaseOtpRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import workRoutes from "./routes/workRoutes.js";
+
 
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +50,10 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
+
+
+
+//REMOVED: CORS middleware configuration
 
 const allowedOrigins =
   process.env.NODE_ENV === "production"
@@ -74,6 +82,7 @@ app.use(
   })
 );
 
+
 // ✅ Logger (only dev)
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
@@ -87,28 +96,27 @@ db.authenticate()
 // ✅ Static Files
 app.use('/uploads', express.static(path.resolve(__dirname, 'uploads')));
 
-
 // ================ PINCODE API PROXY ROUTE ================
 
 app.get('/pincode/:pincode', async (req, res) => {
   const { pincode } = req.params;
-    
+
   // Validate pincode format
   if (!/^[1-9][0-9]{5}$/.test(pincode)) {
-    return res.status(400).json({ 
-      Status: "Error", 
-      Message: "Invalid pincode format. Please enter a valid 6-digit pincode." 
+    return res.status(400).json({
+      Status: "Error",
+      Message: "Invalid pincode format. Please enter a valid 6-digit pincode."
     });
   }
-  
+
   try {
     // Create HTTPS agent that ignores SSL certificate errors (certificate has expired)
     const httpsAgent = new https.Agent({
       rejectUnauthorized: false,
     });
-    
+
     const apiUrl = `https://api.postalpincode.in/pincode/${pincode}`;
-    
+
     const response = await axios.get(apiUrl, {
       httpsAgent: httpsAgent,
       timeout: 15000, // 15 seconds timeout
@@ -117,7 +125,7 @@ app.get('/pincode/:pincode', async (req, res) => {
         'Accept': 'application/json',
       }
     });
-        
+
     if (response.data && Array.isArray(response.data)) {
       const result = response.data[0];
       if (result.Status === "Success") {
@@ -131,7 +139,7 @@ app.get('/pincode/:pincode', async (req, res) => {
     }
   } catch (error) {
     console.error(`❌ Postal API error for pincode ${pincode}:`, error.message);
-    
+
     // Return a proper error response
     res.status(500).json([{
       Status: "Error",
@@ -141,27 +149,31 @@ app.get('/pincode/:pincode', async (req, res) => {
   }
 });
 
-// OPTIONS handler for preflight requests
-app.options('/pincode/:pincode', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.status(200).send();
-});
-
+// REMOVED: OPTIONS handler for preflight requests
+// app.options('/pincode/:pincode', (req, res) => {
+//   res.header('Access-Control-Allow-Origin', '*');
+//   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+//   res.status(200).send();
+// });
 
 app.use('/auth', authRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/issues', issueRoutes);
 app.use('/community-types', communityRoutes);
-app.use('/issue-categories', issueCategoryRoutes);
+app.use("/member-types", memberTypeRoutes);
 app.use('/categories', categoryRoutes);
-app.use('/professional-masters', professionalMasterRoutes);
+app.use("/sub-categories", subCategoryRoutes);
+app.use("/professions", professionRoutes);
+
+app.use("/specializations", specializationRoutes);
 app.use('/broadcasts', broadcastRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/announcements", announcementsRoutes);
 app.use("/token", fcmRoutes);
 app.use("/otp", firebaseOtpRoutes);
 app.use("/work", workRoutes);
+
+
 
 // ✅ Server Start
 const PORT = process.env.PORT || 4040;

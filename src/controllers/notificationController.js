@@ -13,7 +13,7 @@ export const getNotifications = async (req, res) => {
 
         const notifications = await Notification.findAll({
             where: {
-                user_id: userId,
+                user_id: userId
             },
             order: [["created_at", "DESC"]]
         });
@@ -24,10 +24,9 @@ export const getNotifications = async (req, res) => {
         const unreadCount = await Notification.count({
             where: {
                 user_id: userId,
-                is_read: 0
+                is_read: false // or 0 depending on your DB type
             }
         });
-
 
         return res.status(200).json({
             success: true,

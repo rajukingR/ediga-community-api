@@ -36,29 +36,22 @@ export const createAnnouncement = async (req, res) => {
         let usedUserIds = false;
         let parsedUserIds = null;
         let parsedReceiver = null;
+        let memberTypeIds = null;
 
-        // Parse receiver (if provided) – may be used for storage/logging
+        // Parse receiver (now contains member_type IDs)
         if (receiver) {
             if (typeof receiver === "string") {
                 try {
                     parsedReceiver = JSON.parse(receiver);
                 } catch (e) {
-                    parsedReceiver = receiver.split(",");
+                    parsedReceiver = receiver.split(",").map(id => parseInt(id.trim()));
                 }
             } else if (Array.isArray(receiver)) {
                 parsedReceiver = receiver;
             }
-            // Validate receiver types (optional, but keeps consistency)
-            const validTypes = ["member", "volunteer_member", "professional_volunteer", "admin"];
-            if (parsedReceiver && parsedReceiver.length > 0) {
-                const invalidTypes = parsedReceiver.filter(type => !validTypes.includes(type));
-                if (invalidTypes.length) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Invalid receiver types: ${invalidTypes.join(", ")}`,
-                    });
-                }
-            }
+
+            // Store member type IDs for later use
+            memberTypeIds = parsedReceiver;
         }
 
         // CASE A: user_ids provided (priority)
@@ -87,7 +80,7 @@ export const createAnnouncement = async (req, res) => {
                     status: "approved",
                     is_active: true,
                 },
-                attributes: ['id', 'full_name', 'email', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'member_type_id']
             });
 
             if (targetUsers.length === 0) {
@@ -98,22 +91,42 @@ export const createAnnouncement = async (req, res) => {
             }
             usedUserIds = true;
         }
-        // CASE B: only receiver provided (fallback to old behaviour)
+        // CASE B: only receiver (member_type_ids) provided
         else if (receiver && (!user_ids)) {
             if (!parsedReceiver || parsedReceiver.length === 0) {
                 return res.status(400).json({
                     success: false,
-                    message: "Receiver must be a non-empty array with valid types",
+                    message: "Receiver must be a non-empty array with valid member type IDs",
                 });
             }
 
+            // Validate that all member type IDs exist in the database
+            const validMemberTypes = await db.MemberType.findAll({
+                where: {
+                    id: { [Op.in]: parsedReceiver },
+                    is_active: true
+                },
+                attributes: ['id']
+            });
+
+            const validIds = validMemberTypes.map(mt => mt.id);
+            const invalidIds = parsedReceiver.filter(id => !validIds.includes(id));
+
+            if (invalidIds.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid member type IDs: ${invalidIds.join(", ")}. Please provide valid member type IDs.`,
+                });
+            }
+
+            // Fetch users with the given member_type_ids
             targetUsers = await User.findAll({
                 where: {
-                    member_type: { [Op.in]: parsedReceiver },
+                    member_type_id: { [Op.in]: parsedReceiver },
                     status: "approved",
                     is_active: true,
                 },
-                attributes: ['id', 'full_name', 'email', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'member_type_id']
             });
         }
         else {
@@ -143,13 +156,13 @@ export const createAnnouncement = async (req, res) => {
         };
 
         if (usedUserIds) {
-            // Store the selected member types (receiver) as is (for audit)
+            // Store the selected member type IDs (receiver) for audit
             // and also store the specific user IDs in target_user_ids
-            announcementData.receiver = parsedReceiver || [];   // may be empty if none selected
+            announcementData.receiver = memberTypeIds || [];   // Store IDs instead of names
             announcementData.target_user_ids = parsedUserIds;
         } else {
-            // Old flow: store receiver types only
-            announcementData.receiver = parsedReceiver;
+            // Store receiver IDs only
+            announcementData.receiver = memberTypeIds || [];
         }
 
         const announcement = await Announcement.create(announcementData);
@@ -163,8 +176,26 @@ export const createAnnouncement = async (req, res) => {
         let failedEmails = [];
         let failedPush = [];
 
-        // Reuse your existing email HTML template (replace placeholder)
-        const getEmailHtml = (userName, title, description, filePath) => `...`; // your template
+        // Email HTML template
+        const getEmailHtml = (userName, title, description, filePath) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f3ee; border-radius: 10px;">
+                <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">📢 Community Announcement</h1>
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <h2 style="color: #f97316; margin-top: 0;">${title}</h2>
+                    <p style="color: #333; line-height: 1.6; font-size: 16px;">Dear ${userName},</p>
+                    <p style="color: #333; line-height: 1.6; font-size: 16px;">${description}</p>
+                    ${filePath ? `<div style="margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 5px;">
+                        <p style="margin: 0; color: #555;">📎 Attachment: ${filePath}</p>
+                    </div>` : ''}
+                    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #888; font-size: 14px;">
+                        <p>Visit your dashboard for more details: <a href="${process.env.FRONTEND_URL}/dashboard/announcements" style="color: #f97316; text-decoration: none;">View Announcements</a></p>
+                        <p style="margin-top: 10px;">© ${new Date().getFullYear()} Ediga Community</p>
+                    </div>
+                </div>
+            </div>
+        `;
 
         for (const user of targetUsers) {
             try {
@@ -188,7 +219,7 @@ export const createAnnouncement = async (req, res) => {
                 const emailHtml = getEmailHtml(user.full_name, title, description, filePath);
                 await transporter.sendMail({
                     from: `"Ediga Community" <${process.env.EMAIL_USER}>`,
-                    to: user.email,
+                    to: user.email1,
                     subject: `📢 Community Announcement: ${title}`,
                     html: emailHtml
                 });
@@ -215,7 +246,7 @@ export const createAnnouncement = async (req, res) => {
                                     announcement_title: String(title),
                                     description: String(description),
                                     file: filePath || null,
-                                    receiver_type: usedUserIds ? "specific_users" : user.member_type,
+                                    receiver_type: usedUserIds ? "specific_users" : "member_type_" + user.member_type_id,
                                     timestamp: new Date().toISOString()
                                 }
                             });
@@ -223,7 +254,7 @@ export const createAnnouncement = async (req, res) => {
                         } catch (pushError) {
                             failedPush.push({
                                 user_id: user.id,
-                                email: user.email,
+                                email1: user.email1,
                                 token: fcmToken.token.substring(0, 20) + "...",
                                 error: pushError.message
                             });
@@ -231,12 +262,12 @@ export const createAnnouncement = async (req, res) => {
                     });
                     Promise.allSettled(pushPromises).catch(err => console.error("Push batch error:", err.message));
                 } else {
-                    failedPush.push({ user_id: user.id, email: user.email, error: "No active FCM tokens" });
+                    failedPush.push({ user_id: user.id, email1: user.email1, error: "No active FCM tokens" });
                 }
 
             } catch (userError) {
                 console.error(`Failed for user ${user.id}:`, userError);
-                failedEmails.push({ user_id: user.id, email: user.email, error: userError.message });
+                failedEmails.push({ user_id: user.id, email1: user.email1, error: userError.message });
             }
         }
 
@@ -269,7 +300,10 @@ export const createAnnouncement = async (req, res) => {
 ====================================================== */
 export const getAllAnnouncements = async (req, res) => {
     try {
-        let { page = 1, limit = 10, receiver_type, search } = req.query;
+        let { page = 1, limit = 10, receiver, search } = req.query;
+
+        const loginUserId = req.user.id;
+        const isAdmin = req.user.member_type_id === null;
 
         page = Number(page);
         limit = Number(limit);
@@ -278,12 +312,35 @@ export const getAllAnnouncements = async (req, res) => {
         // Build where clause
         let where = {};
 
-        if (receiver_type) {
-            where.receiver = {
-                [Op.contains]: [receiver_type]
+        // For non-admin users, filter by target_user_ids containing their ID
+        if (!isAdmin) {
+            // Non-admin users can only see announcements where they are in target_user_ids
+            where.target_user_ids = {
+                [Op.and]: [
+                    Sequelize.literal(`JSON_CONTAINS(target_user_ids, '${loginUserId}')`)
+                ]
             };
         }
 
+        // Handle receiver filter (only for admin users)
+        if (isAdmin && receiver && receiver !== 'all' && receiver !== '') {
+            const receiverId = parseInt(receiver);
+            if (!isNaN(receiverId) && receiverId > 0) {
+                // For MySQL, use JSON_CONTAINS with literal
+                where.receiver = {
+                    [Op.and]: [
+                        Sequelize.literal(`JSON_CONTAINS(receiver, '${receiverId}')`)
+                    ]
+                };
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid receiver ID. Must be a positive integer.",
+                });
+            }
+        }
+
+        // Search filter (applies to both admin and non-admin)
         if (search) {
             where[Op.or] = [
                 { title: { [Op.like]: `%${search}%` } },
@@ -305,19 +362,24 @@ export const getAllAnnouncements = async (req, res) => {
             page,
             limit,
             totalPages: Math.ceil(count / limit),
+            filters: {
+                receiver: receiver || 'all',
+                search: search || null,
+                user_type: isAdmin ? 'admin' : 'non-admin',
+                user_id: loginUserId
+            },
             data: rows,
         });
 
     } catch (error) {
-        console.error(error);
+        console.error("Error fetching announcements:", error);
         return res.status(500).json({
             success: false,
             message: "Error fetching announcements",
-            error: error.message,
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
     }
 };
-
 /* ======================================================
    GET MEMBER TYPE ANNOUNCEMENTS (For logged-in user)
 ====================================================== */
@@ -326,15 +388,15 @@ export const getMemberTypeAllAnnouncements = async (req, res) => {
         // Logged in user
         const user = req.user;
 
-        // member / volunteer_member / professional_volunteer
-        const memberType = user.member_type;
+        // Get member_type_id from user
+        const memberTypeId = user.member_type_id;
 
-        // Get announcements for this member type
+        // Get announcements for this member type ID
         const announcements = await Announcement.findAll({
             where: {
                 [Op.and]: [
                     Sequelize.literal(
-                        `JSON_CONTAINS(receiver, '["${memberType}"]')`
+                        `JSON_CONTAINS(receiver, '["${memberTypeId}"]')`
                     )
                 ]
             },
@@ -358,6 +420,9 @@ export const getMemberTypeAllAnnouncements = async (req, res) => {
     }
 };
 
+/* ======================================================
+   GET ANNOUNCEMENT BY ID
+====================================================== */
 export const getAnnouncementById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -382,7 +447,7 @@ export const getAnnouncementById = async (req, res) => {
                     status: "approved",
                     is_active: 1,
                 },
-                attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'mobile1', 'district', 'member_type_id']
             });
 
             // Map users by id for quick lookup
@@ -455,6 +520,7 @@ export const updateAnnouncement = async (req, res) => {
             title,
             description,
             receiver,
+            user_ids,  // ADD THIS - user_ids is being received but not used
             remove_file,
         } = req.body;
 
@@ -471,33 +537,63 @@ export const updateAnnouncement = async (req, res) => {
             });
         }
 
-        // Parse receiver
-        if (typeof receiver === "string") {
-            try {
-                receiver = JSON.parse(receiver);
-            } catch (err) {
-                receiver = receiver.split(",");
+        // Parse receiver (now contains IDs)
+        let parsedReceiver = null;
+        if (receiver) {
+            if (typeof receiver === "string") {
+                try {
+                    parsedReceiver = JSON.parse(receiver);
+                } catch (err) {
+                    parsedReceiver = receiver.split(",").map(id => parseInt(id.trim()));
+                }
+            } else if (Array.isArray(receiver)) {
+                parsedReceiver = receiver;
+            }
+
+            // Validate receiver (check if they are valid member type IDs)
+            if (parsedReceiver && parsedReceiver.length > 0) {
+                const validMemberTypes = await db.MemberType.findAll({
+                    where: {
+                        id: { [Op.in]: parsedReceiver },
+                        is_active: true
+                    },
+                    attributes: ['id']
+                });
+
+                const validIds = validMemberTypes.map(mt => mt.id);
+                const invalidIds = parsedReceiver.filter(id => !validIds.includes(id));
+
+                if (invalidIds.length > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Invalid member type IDs: ${invalidIds.join(", ")}`,
+                    });
+                }
             }
         }
 
-        // Validate receiver
-        if (receiver) {
-            const validTypes = [
-                "member",
-                "volunteer_member",
-                "professional_volunteer",
-                "admin"
-            ];
+        // Parse user_ids (specific users)
+        let parsedUserIds = null;
+        if (user_ids) {
+            if (typeof user_ids === "string") {
+                try {
+                    parsedUserIds = JSON.parse(user_ids);
+                } catch (err) {
+                    parsedUserIds = user_ids.split(",").map(id => parseInt(id.trim()));
+                }
+            } else if (Array.isArray(user_ids)) {
+                parsedUserIds = user_ids;
+            }
 
-            const invalidTypes = receiver.filter(
-                (type) => !validTypes.includes(type)
-            );
-
-            if (invalidTypes.length > 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Invalid receiver types: ${invalidTypes.join(", ")}`,
-                });
+            // Validate user_ids are numbers
+            if (parsedUserIds && parsedUserIds.length > 0) {
+                const isValidNumbers = parsedUserIds.every(id => !isNaN(parseInt(id)));
+                if (!isValidNumbers) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "user_ids must contain valid numeric IDs",
+                    });
+                }
             }
         }
 
@@ -519,17 +615,41 @@ export const updateAnnouncement = async (req, res) => {
             updateData.description = description;
         }
 
-        if (receiver !== undefined) {
-            updateData.receiver = receiver;
+        // Update receiver field (store IDs)
+        if (parsedReceiver !== null) {
+            updateData.receiver = parsedReceiver;
+        }
+
+        // Update user_ids field (specific users)
+        if (parsedUserIds !== null) {
+            updateData.target_user_ids = parsedUserIds;
         }
 
         // File upload
         if (req.file) {
+            // Delete old file if exists
+            if (announcement.file) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const oldFilePath = path.join(process.cwd(), 'uploads', announcement.file);
+                if (fs.existsSync(oldFilePath)) {
+                    fs.unlinkSync(oldFilePath);
+                }
+            }
             updateData.file = req.file.filename;
         }
 
         // Remove file
         if (remove_file === "true") {
+            // Delete existing file from storage
+            if (announcement.file) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const filePath = path.join(process.cwd(), 'uploads', announcement.file);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            }
             updateData.file = null;
         }
 
@@ -591,18 +711,22 @@ export const deleteAnnouncement = async (req, res) => {
 };
 
 /* ======================================================
-   GET ANNOUNCEMENTS BY RECEIVER TYPE
+   GET ANNOUNCEMENTS BY RECEIVER TYPE (ID)
 ====================================================== */
 export const getAnnouncementsByReceiverType = async (req, res) => {
     try {
         const { receiver_type } = req.params;
         let { page = 1, limit = 10 } = req.query;
 
-        const validTypes = ['member', 'volunteer_member', 'professional_volunteer', 'admin'];
-        if (!validTypes.includes(receiver_type)) {
+        // receiver_type is now an ID
+        const receiverTypeId = parseInt(receiver_type);
+
+        // Validate if the member type exists
+        const memberType = await db.MemberType.findByPk(receiverTypeId);
+        if (!memberType) {
             return res.status(400).json({
                 success: false,
-                message: `Invalid receiver type. Allowed: ${validTypes.join(', ')}`
+                message: `Invalid member type ID: ${receiver_type}`
             });
         }
 
@@ -612,7 +736,7 @@ export const getAnnouncementsByReceiverType = async (req, res) => {
 
         let where = {
             receiver: {
-                [Op.contains]: [receiver_type]
+                [Op.contains]: [receiverTypeId]
             }
         };
 
@@ -685,38 +809,24 @@ export const getAnnouncementStatistics = async (req, res) => {
     try {
         const totalAnnouncements = await Announcement.count();
 
-        // Get counts by receiver type
-        const memberAnnouncements = await Announcement.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['member']
-                }
-            }
+        // Get all member types
+        const memberTypes = await db.MemberType.findAll({
+            where: { is_active: true },
+            attributes: ['id', 'member_type_name']
         });
 
-        const volunteerMemberAnnouncements = await Announcement.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['volunteer_member']
+        // Get counts by receiver type (using IDs)
+        const byReceiverType = {};
+        for (const mt of memberTypes) {
+            const count = await Announcement.count({
+                where: {
+                    receiver: {
+                        [Op.contains]: [mt.id]
+                    }
                 }
-            }
-        });
-
-        const professionalVolunteerAnnouncements = await Announcement.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['professional_volunteer']
-                }
-            }
-        });
-
-        const adminAnnouncements = await Announcement.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['admin']
-                }
-            }
-        });
+            });
+            byReceiverType[mt.member_type_name] = count;
+        }
 
         // Get recent announcements (last 5)
         const recentAnnouncements = await Announcement.findAll({
@@ -738,12 +848,7 @@ export const getAnnouncementStatistics = async (req, res) => {
             success: true,
             data: {
                 total: totalAnnouncements,
-                by_receiver_type: {
-                    member: memberAnnouncements,
-                    volunteer_member: volunteerMemberAnnouncements,
-                    professional_volunteer: professionalVolunteerAnnouncements,
-                    admin: adminAnnouncements
-                },
+                by_receiver_type: byReceiverType,
                 announcements_with_files: announcementsWithFiles,
                 announcements_without_files: totalAnnouncements - announcementsWithFiles,
                 recent_announcements: recentAnnouncements

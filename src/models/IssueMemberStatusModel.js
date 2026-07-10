@@ -23,6 +23,19 @@ export default (sequelize, DataTypes) => {
                     key: 'id',
                 },
             },
+             user_id: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+                references: {
+                    model: "users",
+                    key: "id",
+                },
+            },
+            send_to_members: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: false,
+            },
             issue_status: {
                 type: DataTypes.ENUM('pending', 'accept', 'reject'),
                 defaultValue: 'pending',

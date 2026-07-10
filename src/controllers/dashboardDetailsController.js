@@ -20,13 +20,13 @@ const getIssueWhereClause = async (user, timeFilter = null) => {
     return { issue_id: null };
   }
 
-  if (user.member_type === "admin") {
+  if (user.member_type_id === "ADM123456789") {
     const where = {};
     if (timeFilter) where.created_at = { [Op.lte]: timeFilter };
     return where;
   }
 
-  if (user.member_type === "member") {
+  if (user.member_type_id === "member") {
     const where = { user_id: user.id };
     if (timeFilter) where.created_at = { [Op.lte]: timeFilter };
     return where;
@@ -82,22 +82,20 @@ export const getDashboardDetails = async (req, res) => {
     }
 
     const user = await User.findByPk(userId, {
-      attributes: ["member_type", "last_login"],
+      attributes: ["member_type_id"],
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    const lastLoginTime = user.last_login || new Date();
-
     // ---------- ADMIN DASHBOARD ----------
-    if (user.member_type === "admin") {
-      const activeUserFilter = { status: "approved", is_active: 1 };
+    if (user.member_type_id === "ADM123456789") {
+      const activeUserFilter = { status: "Approved", is_active: 1 };
       const allMembersFilter = {
         ...activeUserFilter,
-        member_type: { [Op.in]: ["member", "professional_volunteer", "volunteer_member"] },
+        member_type_id: { [Op.in]: [1, 2,3,4,5] },
       };
-      const professionalFilter = { ...activeUserFilter, member_type: "professional_volunteer" };
-      const volunteerFilter = { ...activeUserFilter, member_type: "volunteer_member" };
-      const usersFilter = { ...activeUserFilter, member_type: "member" };
+      const professionalFilter = { ...activeUserFilter, member_type_id: 2 };
+      const volunteerFilter = { ...activeUserFilter, member_type_id: 3 };
+      const usersFilter = { ...activeUserFilter, member_type_id: 1 };
       const activeWorksFilter = { status: "In Progress" };
       const openIssuesFilter = { status: { [Op.notIn]: ["Resolved", "Closed"] } };
       const resolvedIssuesFilter = { status: "Resolved" };
@@ -116,34 +114,18 @@ export const getDashboardDetails = async (req, res) => {
         Issue.count({ where: resolvedIssuesFilter }),
       ]);
 
-      const [
-        totalMembersPrev, professionalVolunteersPrev, volunteerMembersPrev, usersPrev,
-        totalIssuesPrev, activeWorksPrev, openIssuesPrev, resolvedIssuesPrev,
-      ] = await Promise.all([
-        getUserCount(allMembersFilter, lastLoginTime),
-        getUserCount(professionalFilter, lastLoginTime),
-        getUserCount(volunteerFilter, lastLoginTime),
-        getUserCount(usersFilter, lastLoginTime),
-        Issue.count({ where: { created_at: { [Op.lte]: lastLoginTime } } }),
-        Issue.count({ where: { ...activeWorksFilter, created_at: { [Op.lte]: lastLoginTime } } }),
-        Issue.count({ where: { ...openIssuesFilter, created_at: { [Op.lte]: lastLoginTime } } }),
-        Issue.count({ where: { ...resolvedIssuesFilter, created_at: { [Op.lte]: lastLoginTime } } }),
-      ]);
-
       const completionRateCurrent = totalIssuesCurrent === 0 ? 0 : (resolvedIssuesCurrent / totalIssuesCurrent) * 100;
-      const completionRatePrev = totalIssuesPrev === 0 ? 0 : (resolvedIssuesPrev / totalIssuesPrev) * 100;
-      const completionRateChange = completionRateCurrent - completionRatePrev;
 
       const dashboardData = {
-        allMembers: { current: totalMembersCurrent, change: calcPercentChange(totalMembersCurrent, totalMembersPrev) },
-        professionalVolunteers: { current: professionalVolunteersCurrent, change: calcPercentChange(professionalVolunteersCurrent, professionalVolunteersPrev) },
-        volunteerMembers: { current: volunteerMembersCurrent, change: calcPercentChange(volunteerMembersCurrent, volunteerMembersPrev) },
-        users: { current: usersCurrent, change: calcPercentChange(usersCurrent, usersPrev) },
-        totalIssues: { current: totalIssuesCurrent, change: calcPercentChange(totalIssuesCurrent, totalIssuesPrev) },
-        activeWorks: { current: activeWorksCurrent, change: calcPercentChange(activeWorksCurrent, activeWorksPrev) },
-        openIssues: { current: openIssuesCurrent, change: calcPercentChange(openIssuesCurrent, openIssuesPrev) },
-        resolvedIssues: { current: resolvedIssuesCurrent, change: calcPercentChange(resolvedIssuesCurrent, resolvedIssuesPrev) },
-        completionRate: { current: `${completionRateCurrent.toFixed(0)}%`, change: `${completionRateChange >= 0 ? "+" : ""}${completionRateChange.toFixed(1)}%` },
+        allMembers: { current: totalMembersCurrent, change: "0%" },
+        professionalVolunteers: { current: professionalVolunteersCurrent, change: "0%" },
+        volunteerMembers: { current: volunteerMembersCurrent, change: "0%" },
+        users: { current: usersCurrent, change: "0%" },
+        totalIssues: { current: totalIssuesCurrent, change: "0%" },
+        activeWorks: { current: activeWorksCurrent, change: "0%" },
+        openIssues: { current: openIssuesCurrent, change: "0%" },
+        resolvedIssues: { current: resolvedIssuesCurrent, change: "0%" },
+        completionRate: { current: `${completionRateCurrent.toFixed(0)}%`, change: "0%" },
       };
       return res.status(200).json({ success: true, data: dashboardData });
     }
@@ -152,20 +134,15 @@ export const getDashboardDetails = async (req, res) => {
     const totalCurrent = await getIssueCount(user);
     const openCurrent = await getIssueCount(user, null, { [Op.notIn]: ["Resolved", "Closed"] });
     const resolvedCurrent = await getIssueCount(user, null, "Resolved");
-    const totalPrev = await getIssueCount(user, lastLoginTime);
-    const openPrev = await getIssueCount(user, lastLoginTime, { [Op.notIn]: ["Resolved", "Closed"] });
-    const resolvedPrev = await getIssueCount(user, lastLoginTime, "Resolved");
 
     const completionRateCurrent = totalCurrent === 0 ? 0 : (resolvedCurrent / totalCurrent) * 100;
-    const completionRatePrev = totalPrev === 0 ? 0 : (resolvedPrev / totalPrev) * 100;
-    const completionRateChange = completionRateCurrent - completionRatePrev;
 
     const personalDashboard = {
-      totalIssues: { current: totalCurrent, change: calcPercentChange(totalCurrent, totalPrev) },
-      openIssues: { current: openCurrent, change: calcPercentChange(openCurrent, openPrev) },
-      resolvedIssues: { current: resolvedCurrent, change: calcPercentChange(resolvedCurrent, resolvedPrev) },
-      completionRate: { current: `${completionRateCurrent.toFixed(0)}%`, change: `${completionRateChange >= 0 ? "+" : ""}${completionRateChange.toFixed(1)}%` },
-      memberType: user.member_type,
+      totalIssues: { current: totalCurrent, change: "0%" },
+      openIssues: { current: openCurrent, change: "0%" },
+      resolvedIssues: { current: resolvedCurrent, change: "0%" },
+      completionRate: { current: `${completionRateCurrent.toFixed(0)}%`, change: "0%" },
+      memberType: user.member_type_id,
     };
     return res.status(200).json({ success: true, data: personalDashboard });
   } catch (error) {
@@ -173,7 +150,6 @@ export const getDashboardDetails = async (req, res) => {
     return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
 };
-
 /* ======================================================
    2. GROWTH OVERVIEW (role‑based)
 ====================================================== */
@@ -183,10 +159,10 @@ export const getGrowthOverview = async (req, res) => {
     if (!userId) {
       return res.status(401).json({ success: false, message: "Unauthorized: Invalid user data" });
     }
-    const user = await User.findByPk(userId, { attributes: ["member_type"] });
+    const user = await User.findByPk(userId, { attributes: ["member_type_id"] });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    const isAdmin = user.member_type === "admin";
+    const isAdmin = user.member_type_id === "ADM123456789";
     const now = new Date();
     const months = [];
     for (let i = 7; i >= 0; i--) {
@@ -200,8 +176,8 @@ export const getGrowthOverview = async (req, res) => {
         const endDate = new Date(month.start.getFullYear(), month.start.getMonth() + 1, 1);
         const members = await User.count({
           where: {
-            member_type: { [Op.in]: ["member", "professional_volunteer", "volunteer_member"] },
-            status: "approved", is_active: 1,
+            member_type_id: { [Op.in]: [1, 2, 3, 4, 5] },
+            status: "Approved", is_active: 1,
             created_at: { [Op.gte]: month.start, [Op.lt]: endDate },
           },
         });
@@ -245,11 +221,11 @@ export const getStateDistribution = async (req, res) => {
     const user = await User.findByPk(userId);
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    if (user.member_type === "admin") {
+    if (user.member_type_id === "ADM123456789") {
       const users = await User.findAll({
         where: {
-          member_type: { [Op.in]: ["member", "professional_volunteer", "volunteer_member"] },
-          status: "approved", is_active: 1,
+          member_type_id: { [Op.in]: [1, 2, 3, 4, 5] },
+          status: "Approved", is_active: 1,
         },
         attributes: ["address"],
       });
@@ -307,14 +283,14 @@ export const getRecentIssues = async (req, res) => {
     }
 
     const user = await User.findByPk(userId, {
-      attributes: ["id", "member_type"]
+      attributes: ["id", "member_type_id"]
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
     const limit = parseInt(req.query.limit) || 5;
 
     // Admin case – just return recent issues without extra statuses
-    if (user.member_type === "admin") {
+    if (user.member_id === "ADM123456789") {
       const recentIssues = await Issue.findAll({
         order: [["created_at", "DESC"]],
         limit: limit,
@@ -331,7 +307,7 @@ export const getRecentIssues = async (req, res) => {
     }
 
     // Member case – own reported issues
-    if (user.member_type === "member") {
+    if (user.member_type_id === "member") {
       const recentIssues = await Issue.findAll({
         where: { user_id: user.id },
         order: [["created_at", "DESC"]],
@@ -388,7 +364,7 @@ export const getRecentIssues = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "full_name", "email", "mobile_1", "photo"],
+          attributes: ["id", "full_name", "email1", "mobile_1", "photo"],
         }
       ],
     });
@@ -471,7 +447,7 @@ export const getRecentActivities = async (req, res) => {
         const match = msg.match(/from (.+?)\./);
         user = match ? match[1] : "Someone";
         action = "registered as";
-        target = detail.member_type || "member";
+        target = detail.member_type_id || "member";
       } else if (msg.includes("created a new Member:")) {
         const match = msg.match(/(.+?) created a new Member: (.+?)\./);
         user = match ? match[1] : "Someone";
@@ -509,7 +485,7 @@ export const assignIssue = async (req, res) => {
     }
 
     const admin = await User.findByPk(adminId);
-    if (!admin || admin.member_type !== "admin") {
+    if (!admin || admin.member_type_id !== "admin") {
       return res.status(403).json({ success: false, message: "Forbidden: Admin access required" });
     }
 
@@ -523,7 +499,7 @@ export const assignIssue = async (req, res) => {
 
     const member = await User.findByPk(member_id);
     if (!member) return res.status(404).json({ success: false, message: "Member not found" });
-    if (!["professional_volunteer", "volunteer_member"].includes(member.member_type)) {
+    if (!["professional_volunteer", "volunteer_member"].includes(member.member_type_id)) {
       return res.status(400).json({ success: false, message: "Issue can only be assigned to professional_volunteer or volunteer_member" });
     }
 

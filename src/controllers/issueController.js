@@ -4,6 +4,7 @@ import nodemailer from "nodemailer";
 import { sendPushToUser } from "../services/pushService.js";
 
 const Issue = db.Issue;
+const Category = db.Category;
 const User = db.User;
 const IssueMemberStatus = db.IssueMemberStatus;
 const Notification = db.Notification;
@@ -36,7 +37,7 @@ export const createIssue = async (req, res) => {
     } = req.body;
 
     const created_date = new Date();
-    
+
     // Create the issue
     const issue = await Issue.create({
       issue_id,
@@ -56,7 +57,7 @@ export const createIssue = async (req, res) => {
     let member = null;
     try {
       member = await User.findByPk(user_id, {
-        attributes: ['id', 'full_name', 'email', 'mobile_1', 'member_type']
+        attributes: ['id', 'full_name', 'email1', 'mobile1']
       });
     } catch (err) {
       console.error("Error fetching member:", err);
@@ -67,11 +68,11 @@ export const createIssue = async (req, res) => {
     try {
       admins = await User.findAll({
         where: {
-          member_type: "admin",
-          status: "approved",
+          member_id: "ADM123456789",
+          status: "Approved",
           is_active: true
         },
-        attributes: ['id', 'full_name', 'email'] // Make sure push_token is included
+        attributes: ['id', 'full_name', 'email1'] // Make sure push_token is included
       });
     } catch (err) {
       console.error("Error fetching admins:", err);
@@ -107,17 +108,17 @@ export const createIssue = async (req, res) => {
               reported_by: member ? {
                 id: member.id,
                 name: member.full_name,
-                email: member.email,
-                mobile: member.mobile_1
+                email1: member.email1,
+                mobile: member.mobile1
               } : null,
               current_address: current_address,
               created_date: created_date
             },
-            photo: "bell-icon.webp"
+            member_photo: "bell-icon.webp"
           });
           notificationSentCount++;
 
-          // Send email to admin
+          // Send email1 to admin
           const emailHtml = `
             <!DOCTYPE html>
             <html>
@@ -191,9 +192,9 @@ export const createIssue = async (req, res) => {
                     <div class="member-info">
                         <h3 style="margin-top: 0; color: #f59e0b;">👤 Member Information</h3>
                         <p><strong>Name:</strong> ${member.full_name || 'Unknown'}</p>
-                        <p><strong>Email:</strong> ${member.email || 'Not provided'}</p>
-                        <p><strong>Mobile:</strong> ${member.mobile_1 || 'Not provided'}</p>
-                        <p><strong>Member Type:</strong> ${member.member_type?.replace(/_/g, ' ') || 'Unknown'}</p>
+                        <p><strong>Email:</strong> ${member.email1 || 'Not provided'}</p>
+                        <p><strong>Mobile:</strong> ${member.mobile1 || 'Not provided'}</p>
+                        <p><strong>Member Type:</strong> ${member.member_type_id?.replace(/_/g, ' ') || 'Unknown'}</p>
                     </div>
                     ` : ''}
                     
@@ -241,7 +242,7 @@ export const createIssue = async (req, res) => {
                 
                 <div class="footer">
                     <p>© 2025 Ediga Community. All rights reserved.</p>
-                    <p>This is an automated message, please do not reply directly to this email.</p>
+                    <p>This is an automated message, please do not reply directly to this email1.</p>
                 </div>
             </body>
             </html>
@@ -249,18 +250,18 @@ export const createIssue = async (req, res) => {
 
           await transporter.sendMail({
             from: `"Ediga Community" <${process.env.EMAIL_USER}>`,
-            to: admin.email,
+            to: admin.email1,
             subject: `🆕 New Issue Reported: ${issue_id} - ${title}`,
             html: emailHtml
           });
           emailSentCount++;
 
         } catch (adminError) {
-          console.error(`Failed to send email to admin ${admin.id}:`, adminError);
+          console.error(`Failed to send email1 to admin ${admin.id}:`, adminError);
           failedNotifications.push({
             admin_id: admin.id,
-            email: admin.email,
-            type: 'email',
+            email1: admin.email1,
+            type: 'email1',
             error: adminError.message
           });
         }
@@ -288,14 +289,14 @@ export const createIssue = async (req, res) => {
               timestamp: String(new Date().toISOString())
             }
           });
-          
+
           pushSentCount++;
           return result;
         } catch (error) {
-          console.error(`❌ Push error for admin ${admin.email}:`, error.message);
+          console.error(`❌ Push error for admin ${admin.email1}:`, error.message);
           failedNotifications.push({
             admin_id: admin.id,
-            email: admin.email,
+            email1: admin.email1,
             type: 'push',
             error: error.message
           });
@@ -341,10 +342,15 @@ export const createIssue = async (req, res) => {
    GET ALL ISSUES (PAGINATION)
    - Excludes issues where another member has already accepted
 ====================================================== */
+/* ======================================================
+   GET ALL ISSUES (PAGINATION)
+   - Admin (member_type_id === null) gets all issues
+   - Members get only issues assigned to them
+====================================================== */
 export const getAllIssues = async (req, res) => {
   try {
     const loggedUserId = req.user.id;
-    const isAdmin = req.user.member_type === "admin";
+    const isAdmin = req.user.member_type_id === null;
 
     let { page = 1, limit = 10 } = req.query;
 
@@ -432,22 +438,27 @@ export const getAllIssues = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ['id', 'full_name', 'email', 'mobile_1', 'photo']
+          attributes: ['id', 'full_name', 'email1', 'mobile1', 'member_photo']
         },
         {
           model: User,
           as: "assignedBy",
-          attributes: ['id', 'full_name', 'email', 'member_type']
-        }
+          attributes: ['id', 'full_name', 'email1']
+        },
+        {
+          model: Category,
+          as: "category",
+          attributes: ["id", "category_name"],
+        },
       ],
     });
 
     // For non-admin users, fetch their statuses separately
     let transformedRows = rows;
-    
+
     if (!isAdmin && rows.length > 0) {
       const issueIds = rows.map(issue => issue.id);
-      
+
       const memberStatuses = await IssueMemberStatus.findAll({
         where: {
           issue_id: { [Op.in]: issueIds },
@@ -456,7 +467,7 @@ export const getAllIssues = async (req, res) => {
         attributes: ['issue_id', 'issue_status', 'remarks', 'created_at', 'updated_at'],
         raw: true
       });
-      
+
       const statusMap = {};
       memberStatuses.forEach(status => {
         statusMap[status.issue_id] = {
@@ -466,7 +477,7 @@ export const getAllIssues = async (req, res) => {
           responded_at: status.updated_at
         };
       });
-      
+
       transformedRows = rows.map(issue => {
         const issueData = issue.toJSON();
         return {
@@ -475,18 +486,43 @@ export const getAllIssues = async (req, res) => {
           title: issueData.title,
           description: issueData.description,
           issue_type: issueData.issue_type,
+          category_id: issueData.category_id,
+          category_name: issueData.category?.category_name || null,
           status: issueData.status,
           contact_mobile: issueData.contact_mobile,
           current_address: issueData.current_address,
           created_date: issueData.created_date,
           assigned_date: issueData.assigned_date,
           user: issueData.user,
+          assigned_by: issueData.assignedBy,
           my_issue_status: statusMap[issueData.id] || {
             status: 'pending',
             remarks: null,
             assigned_at: null,
             responded_at: null
           }
+        };
+      });
+    } else if (isAdmin && rows.length > 0) {
+      // For admin, include category_name but no my_issue_status
+      transformedRows = rows.map(issue => {
+        const issueData = issue.toJSON();
+        return {
+          id: issueData.id,
+          issue_id: issueData.issue_id,
+          title: issueData.title,
+          description: issueData.description,
+          issue_type: issueData.issue_type,
+          category_id: issueData.category_id,
+          category_name: issueData.category?.category_name || null,
+          status: issueData.status,
+          contact_mobile: issueData.contact_mobile,
+          current_address: issueData.current_address,
+          created_date: issueData.created_date,
+          assigned_date: issueData.assigned_date,
+          user: issueData.user,
+          assigned_by: issueData.assignedBy,
+          // Admin doesn't have my_issue_status
         };
       });
     }
@@ -516,7 +552,6 @@ export const getAllIssues = async (req, res) => {
 ====================================================== */
 export const getAllIssuesByUserId = async (req, res) => {
   try {
-
     const { id } = req.params;
     let { page = 1, limit = 10 } = req.query;
 
@@ -531,9 +566,60 @@ export const getAllIssuesByUserId = async (req, res) => {
       offset,
       order: [["id", "DESC"]],
       include: [
-        { model: User, as: "user" },
-        { model: User, as: "assignedBy" },
+        { 
+          model: User, 
+          as: "user" 
+        },
+        { 
+          model: User, 
+          as: "assignedBy" 
+        },
+        {
+          model: User,
+          as: "assignedMembers",
+          through: {
+            attributes: ['issue_status', 'created_at', 'updated_at', 'send_to_members']
+          },
+          attributes: [
+            'id', 
+            'full_name', 
+            'email1', 
+            'mobile1', 
+            'member_photo',
+            'city',
+            'state',
+            'district',
+            'profession_id',
+            'specialization_id',
+            'member_type_id'
+          ]
+        }
       ],
+    });
+
+    // Format the response to include assigned_by user details
+    const formattedRows = rows.map(issue => {
+      const issueData = issue.toJSON ? issue.toJSON() : issue;
+      
+      // Get assigned_by user details from the assignedBy association
+      let assignedByDetails = null;
+      if (issueData.assignedBy) {
+        assignedByDetails = {
+          id: issueData.assignedBy.id,
+          full_name: issueData.assignedBy.full_name,
+          email1: issueData.assignedBy.email1,
+          mobile1: issueData.assignedBy.mobile1,
+          member_photo: issueData.assignedBy.member_photo,
+          member_type_id: issueData.assignedBy.member_type_id
+        };
+      }
+
+      return {
+        ...issueData,
+        assigned_by_details: assignedByDetails,
+        // Remove the raw assignedBy from response if you want cleaner output
+        // assignedBy: undefined
+      };
     });
 
     return res.status(200).json({
@@ -542,17 +628,104 @@ export const getAllIssuesByUserId = async (req, res) => {
       page,
       limit,
       totalPages: Math.ceil(count / limit),
-      data: rows,
+      data: formattedRows,
     });
 
   } catch (error) {
+    console.error("Error fetching user issues:", error);
     return res.status(500).json({
+      success: false,
       message: "Error fetching user issues",
-      error: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };
 
+
+
+/* ======================================================
+   GET ISSUES ASSIGNED TO USER (Using issue_member_status table)
+====================================================== */
+export const getIssuesAssignedToUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    let { page = 1, limit = 10 } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+
+    const offset = (page - 1) * limit;
+
+    // Query issues through the issue_member_status table
+    const { count, rows } = await Issue.findAndCountAll({
+      include: [
+        {
+          model: IssueMemberStatus,
+          as: "memberStatuses", // Correct alias from your model (plural)
+          where: {
+            member_id: userId,
+            issue_status: {
+              [Op.in]: ['pending', 'accept'] // Get both pending and accepted assignments
+            }
+          },
+          required: true, // INNER JOIN - only get issues assigned to this user
+          attributes: ['id', 'issue_status', 'remarks', 'created_at', 'updated_at']
+        },
+        {
+          model: User,
+          as: "user",
+          attributes: ['id', 'full_name', 'email1', 'mobile1', 'member_photo']
+        },
+        {
+          model: User,
+          as: "assignedBy",
+          attributes: ['id', 'full_name', 'email1', 'mobile1'],
+          required: false // LEFT JOIN - assigned_by might be null
+        }
+      ],
+      limit,
+      offset,
+      order: [["assigned_date", "DESC"]],
+      distinct: true // Important for count with includes
+    });
+
+    // Format the response
+    const formattedData = rows.map(issue => {
+      const issueJSON = issue.toJSON();
+      const memberStatus = issueJSON.memberStatuses?.[0]; // Get first member status
+
+      // Remove memberStatuses from response
+      delete issueJSON.memberStatuses;
+
+      return {
+        ...issueJSON,
+        my_issue_status: memberStatus ? {
+          status: memberStatus.issue_status,
+          remarks: memberStatus.remarks,
+          assigned_at: memberStatus.created_at,
+          responded_at: memberStatus.updated_at
+        } : null
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      total: count,
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit),
+      data: formattedData,
+    });
+
+  } catch (error) {
+    console.error("Error fetching assigned issues:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching assigned issues",
+      error: error.message,
+    });
+  }
+};
 
 /* ======================================================
    GET ISSUES BY ASSIGNED BY ID (WITH MEMBER STATUS)
@@ -585,7 +758,7 @@ export const getAllIssuesById = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ['id', 'full_name', 'email', 'mobile_1', 'photo', 'member_type']
+          attributes: ['id', 'full_name', 'email1', 'mobile1', 'member_photo']
         }
       ],
     });
@@ -632,20 +805,20 @@ export const getAllIssuesById = async (req, res) => {
     // Transform rows with member statuses (only current member's status)
     const transformedRows = rows.map(issue => {
       const issueData = issue.toJSON();
-      
+
       // Parse assigned_by JSON if it's a string
       let assignedByArray = issueData.assigned_by;
       if (typeof assignedByArray === 'string') {
         try {
           assignedByArray = JSON.parse(assignedByArray);
-        } catch(e) {
+        } catch (e) {
           assignedByArray = [];
         }
       }
-      
+
       // Get current member's status for this issue
       const currentMemberStatus = statusMap[issueData.id] || null;
-      
+
       return {
         id: issueData.id,
         issue_id: issueData.issue_id,
@@ -693,11 +866,10 @@ export const getAllIssuesById = async (req, res) => {
     });
   }
 };
-
 // controllers/issueController.js
 
 /* ======================================================
-   GET SINGLE ISSUE WITH ASSIGNED PROFESSIONALS AND VOLUNTEERS
+   GET SINGLE ISSUE WITH ASSIGNED MEMBERS
 ====================================================== */
 export const getIssueById = async (req, res) => {
   try {
@@ -705,8 +877,21 @@ export const getIssueById = async (req, res) => {
 
     const issue = await Issue.findByPk(id, {
       include: [
-        { model: User, as: "user" },
-        { model: User, as: "assignedBy" }
+        { 
+          model: User, 
+          as: "user",
+          attributes: ['id', 'full_name', 'email1', 'mobile1', 'member_photo', 'member_type_id', 'pin_code']
+        },
+        { 
+          model: User, 
+          as: "assignedBy",
+          attributes: ['id', 'full_name', 'email1', 'member_photo']
+        },
+        {
+          model: Category,
+          as: "category",
+          attributes: ["id", "category_name", "description", "is_active"],
+        },
       ],
     });
 
@@ -729,7 +914,7 @@ export const getIssueById = async (req, res) => {
     });
 
     const assignedMemberIds = assignedMemberRecords.map(record => record.member_id);
-    
+
     // Create a map of member status
     const memberStatusMap = {};
     assignedMemberRecords.forEach(record => {
@@ -743,9 +928,7 @@ export const getIssueById = async (req, res) => {
 
     // Fetch details for all assigned members
     let allAssignedMembers = [];
-    let assignedProfessionals = [];
-    let assignedVolunteers = [];
-    
+
     if (assignedMemberIds.length > 0) {
       const members = await User.findAll({
         where: {
@@ -754,10 +937,12 @@ export const getIssueById = async (req, res) => {
           status: "approved"
         },
         attributes: [
-          'id', 'full_name', 'member_type', 'profession', 'category', 'email',
-          'mobile_1', 'mobile_2', 'photo', 'years_of_experience',
-          'organization', 'city', 'district', 'state', 'address',
-          'member_id', 'taluk_zone', 'blood_group', 'date_of_birth', 'age'
+          'id', 'full_name', 'email1', 'mobile1', 'mobile2', 
+          'member_photo', 'city', 'district', 'state', 'address',
+          'member_id', 'member_type_id', 'blood_group', 'age',
+          'profession_id', 'specialization_id', 'organisation',
+          'booth_no', 'pin_code', 'parent_name', 'website',
+          'contact_person'
         ]
       });
 
@@ -765,48 +950,41 @@ export const getIssueById = async (req, res) => {
         id: member.id,
         name: member.full_name,
         member_id: member.member_id || `MEM${member.id}`,
-        member_type: member.member_type,
-        profession: member.profession,
-        category: member.category,
-        email: member.email,
-        mobile_1: member.mobile_1,
-        mobile_2: member.mobile_2,
-        years_of_experience: member.years_of_experience,
-        photo: member.photo,
-        organization: member.organization,
+        member_type_id: member.member_type_id,
+        profession_id: member.profession_id,
+        specialization_id: member.specialization_id,
+        email1: member.email1,
+        mobile1: member.mobile1,
+        mobile2: member.mobile2,
+        member_photo: member.member_photo,
+        organisation: member.organisation,
         city: member.city,
         district: member.district,
         state: member.state,
         address: member.address,
-        taluk_zone: member.taluk_zone,
         blood_group: member.blood_group,
-        date_of_birth: member.date_of_birth,
         age: member.age,
+        booth_no: member.booth_no,
+        pin_code: member.pin_code,
+        parent_name: member.parent_name,
+        website: member.website,
+        contact_person: member.contact_person,
         assignment_status: memberStatusMap[member.id]?.issue_status || 'pending',
         remarks: memberStatusMap[member.id]?.remarks || null,
         assigned_at: memberStatusMap[member.id]?.assigned_at,
         status_updated_at: memberStatusMap[member.id]?.updated_at
       }));
-
-      // Separate professionals and volunteers
-      assignedProfessionals = allAssignedMembers.filter(
-        member => member.member_type === "professional_volunteer"
-      );
-      
-      assignedVolunteers = allAssignedMembers.filter(
-        member => member.member_type === "volunteer_member"
-      );
     }
 
     // Also check the assigned_by JSON field for backward compatibility
     let legacyAssignedIds = [];
     if (issueData.assigned_by && Array.isArray(issueData.assigned_by) && issueData.assigned_by.length > 0) {
       legacyAssignedIds = issueData.assigned_by;
-      
+
       // Fetch any legacy assigned members not already in the list
       const existingIds = new Set(assignedMemberIds);
       const newLegacyIds = legacyAssignedIds.filter(id => !existingIds.has(id));
-      
+
       if (newLegacyIds.length > 0) {
         const legacyMembers = await User.findAll({
           where: {
@@ -815,9 +993,11 @@ export const getIssueById = async (req, res) => {
             status: "approved"
           },
           attributes: [
-            'id', 'full_name', 'member_type', 'profession', 'category', 'email',
-            'mobile_1', 'mobile_2', 'photo', 'years_of_experience',
-            'organization', 'city', 'district', 'state', 'address', 'member_id'
+            'id', 'full_name', 'email1', 'mobile1', 'mobile2',
+            'member_photo', 'city', 'district', 'state', 'address',
+            'member_id', 'member_type_id', 'blood_group', 'age',
+            'profession_id', 'specialization_id', 'organisation',
+            'booth_no', 'pin_code'
           ]
         });
 
@@ -825,47 +1005,44 @@ export const getIssueById = async (req, res) => {
           id: member.id,
           name: member.full_name,
           member_id: member.member_id || `MEM${member.id}`,
-          member_type: member.member_type,
-          profession: member.profession,
-          category: member.category,
-          email: member.email,
-          mobile_1: member.mobile_1,
-          mobile_2: member.mobile_2,
-          years_of_experience: member.years_of_experience,
-          photo: member.photo,
-          organization: member.organization,
+          member_type_id: member.member_type_id,
+          profession_id: member.profession_id,
+          specialization_id: member.specialization_id,
+          email1: member.email1,
+          mobile1: member.mobile1,
+          mobile2: member.mobile2,
+          member_photo: member.member_photo,
+          organisation: member.organisation,
           city: member.city,
           district: member.district,
           state: member.state,
           address: member.address,
+          blood_group: member.blood_group,
+          age: member.age,
+          booth_no: member.booth_no,
+          pin_code: member.pin_code,
           assignment_status: 'pending',
           remarks: null,
           assigned_at: issueData.assigned_date,
           is_legacy: true
         }));
 
-        // Add legacy members to respective arrays
-        legacyMembersFormatted.forEach(member => {
-          if (member.member_type === "professional_volunteer") {
-            assignedProfessionals.push(member);
-          } else if (member.member_type === "volunteer_member") {
-            assignedVolunteers.push(member);
-          }
-        });
+        allAssignedMembers = [...allAssignedMembers, ...legacyMembersFormatted];
       }
     }
 
+    // Count statuses
+    const pendingCount = allAssignedMembers.filter(m => m.assignment_status === 'pending').length;
+    const acceptedCount = allAssignedMembers.filter(m => m.assignment_status === 'accept').length;
+    const rejectedCount = allAssignedMembers.filter(m => m.assignment_status === 'reject').length;
+
     // Add to response
     issueData.assigned_members = allAssignedMembers;
-    issueData.assigned_professionals = assignedProfessionals;
-    issueData.assigned_volunteers = assignedVolunteers;
     issueData.assignment_summary = {
-      total_assigned: assignedProfessionals.length + assignedVolunteers.length,
-      professionals_count: assignedProfessionals.length,
-      volunteers_count: assignedVolunteers.length,
-      pending_count: [...assignedProfessionals, ...assignedVolunteers].filter(m => m.assignment_status === 'pending').length,
-      accepted_count: [...assignedProfessionals, ...assignedVolunteers].filter(m => m.assignment_status === 'accept').length,
-      rejected_count: [...assignedProfessionals, ...assignedVolunteers].filter(m => m.assignment_status === 'reject').length
+      total_assigned: allAssignedMembers.length,
+      pending: pendingCount,
+      accepted: acceptedCount,
+      rejected: rejectedCount
     };
 
     return res.status(200).json({
@@ -881,7 +1058,6 @@ export const getIssueById = async (req, res) => {
     });
   }
 };
-
 /* ======================================================
    UPDATE ISSUE
 ====================================================== */
@@ -981,214 +1157,527 @@ export const deleteIssue = async (req, res) => {
    - Professional Volunteer assigning volunteer_members
    Compatible with existing issue_member_status table structure
 ====================================================== */
+
+
 export const assignMultipleMembers = async (req, res) => {
+  // Start a transaction for data consistency
+  const transaction = await db.sequelize.transaction();
+
   try {
-    const { issue_id, professional_ids, volunteer_ids } = req.body;
-    const loginId = req.user.id;
-    const loginUserRole = req.user.member_type;
+    const { issue_id, professional_ids, send_to_members } = req.body;
 
     // Validate issue_id
     if (!issue_id) {
+      await transaction.rollback();
       return res.status(400).json({
         success: false,
         message: "Issue ID is required"
       });
     }
 
-    // Determine which type of assignment is being made
-    const isAssigningProfessionals = professional_ids && Array.isArray(professional_ids) && professional_ids.length > 0;
-    const isAssigningVolunteers = volunteer_ids && Array.isArray(volunteer_ids) && volunteer_ids.length > 0;
+    const issueId = parseInt(issue_id);
 
-    if (!isAssigningProfessionals && !isAssigningVolunteers) {
+    // Validate professional_ids
+    if (!professional_ids || !Array.isArray(professional_ids) || professional_ids.length === 0) {
+      await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "Either professional_ids or volunteer_ids must be provided"
+        message: "professional_ids must be provided as a non-empty array"
       });
     }
 
-    // Authorization checks based on role
-    if (isAssigningProfessionals && loginUserRole !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Only admin can assign professional volunteers"
-      });
-    }
+    // Find the issue with transaction
+    const issue = await Issue.findByPk(issueId, { 
+      transaction,
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ['id', 'full_name', 'email1', 'mobile1', 'member_type_id']
+        }
+      ]
+    });
 
-    if (isAssigningVolunteers && loginUserRole !== "professional_volunteer" && loginUserRole !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Only professional volunteers or admin can assign volunteer members"
-      });
-    }
-
-    // Find the issue
-    const issue = await Issue.findByPk(issue_id);
     if (!issue) {
+      await transaction.rollback();
       return res.status(404).json({
         success: false,
         message: "Issue not found"
       });
     }
 
-    let memberIds = [];
-    let memberTypeCondition = {};
-    let assignmentType = "";
-
-    // Set up conditions based on assignment type
-    if (isAssigningProfessionals) {
-      memberIds = professional_ids;
-      memberTypeCondition = {
-        member_type: {
-          [Op.in]: ["professional_volunteer", "volunteer_member"]
-        }
-      };
-      assignmentType = "professional";
-    } else if (isAssigningVolunteers) {
-      memberIds = volunteer_ids;
-      memberTypeCondition = {
-        member_type: "volunteer_member"
-      };
-      assignmentType = "volunteer";
-    }
-
-    // Find all members to assign
+    // Find all members to assign (admin can assign any approved/active members with member_type_id = 2)
     const members = await User.findAll({
       where: {
-        id: { [Op.in]: memberIds },
-        ...memberTypeCondition,
-        status: "approved",
+        id: { [Op.in]: professional_ids },
+        member_type_id: 2, // Only professional volunteers
+        status: "Approved",
         is_active: true
-      }
+      },
+      transaction
     });
 
     if (members.length === 0) {
+      await transaction.rollback();
       return res.status(404).json({
         success: false,
-        message: `No valid ${assignmentType} members found`
+        message: "No valid professional members found"
       });
-    }
-
-    // For volunteer assignments, verify they are assigned to this professional volunteer (if not admin)
-    if (assignmentType === "volunteer" && loginUserRole !== "admin") {
-      const validVolunteers = await User.findAll({
-        where: {
-          id: { [Op.in]: memberIds },
-          superior_id: loginId
-        }
-      });
-
-      if (validVolunteers.length !== memberIds.length) {
-        return res.status(403).json({
-          success: false,
-          message: "You can only assign volunteers that are assigned to you"
-        });
-      }
     }
 
     // Get existing assigned members from IssueMemberStatus
     const existingAssignments = await IssueMemberStatus.findAll({
       where: {
-        issue_id: parseInt(issue_id),
-        member_id: { [Op.in]: memberIds }
+        issue_id: issueId,
+        member_id: { [Op.in]: professional_ids },
+        user_id: issue.user_id,
       },
-      attributes: ['member_id']
+      attributes: ['member_id', 'issue_status', 'send_to_members'],
+      transaction
     });
 
     const existingIds = existingAssignments.map(e => e.member_id);
-    const trulyNewMemberIds = memberIds.filter(id => !existingIds.includes(id));
+    const trulyNewMemberIds = professional_ids.filter(id => !existingIds.includes(id));
 
     if (trulyNewMemberIds.length === 0) {
+      await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: `All selected ${assignmentType} members are already assigned to this issue`
+        message: "All selected professional members are already assigned to this issue",
+        existing_assignments: existingAssignments
       });
     }
 
+    // Filter to only get the actual member objects for newly assigned IDs
+    const newlyAssignedMembers = members.filter(m => trulyNewMemberIds.includes(m.id));
+
     // Create pending status records for newly assigned members
-    // Using only the columns that exist in your table
     const memberStatusRecords = trulyNewMemberIds.map(member_id => ({
-      issue_id: parseInt(issue_id),
+      issue_id: issueId,
       member_id: member_id,
-      issue_status: 'pending',  // Using 'pending' as default status
+      user_id: issue.user_id,
+      issue_status: 'pending',
+      send_to_members: send_to_members || false,
       created_at: new Date(),
       updated_at: new Date()
     }));
 
     await IssueMemberStatus.bulkCreate(memberStatusRecords, {
-      ignoreDuplicates: true
+      ignoreDuplicates: true,
+      transaction
     });
 
     // Update assigned_by JSON field for backward compatibility
     let currentAssignments = [];
     if (issue.assigned_by) {
       try {
-        currentAssignments = Array.isArray(issue.assigned_by) 
-          ? issue.assigned_by 
+        currentAssignments = Array.isArray(issue.assigned_by)
+          ? issue.assigned_by
           : JSON.parse(issue.assigned_by);
+        
+        if (!Array.isArray(currentAssignments)) {
+          currentAssignments = [];
+        }
       } catch (e) {
         currentAssignments = [];
       }
     }
-    
+
     const updatedAssignments = [...new Set([...currentAssignments, ...trulyNewMemberIds])];
-    
+
     // Update issue status if it was pending
-    const newIssueStatus = issue.status === "Pending" ? "In Progress" : issue.status;
-    
+    let newIssueStatus = issue.status;
+    if (issue.status === "Pending") {
+      newIssueStatus = "In Progress";
+    }
+
     await issue.update({
       assigned_by: updatedAssignments,
       assigned_date: new Date(),
       status: newIssueStatus,
       updated_at: new Date()
-    });
+    }, { transaction });
+
+    // Commit transaction
+    await transaction.commit();
+
+    // === SEND NOTIFICATIONS AND EMAILS ===
+    let notificationSentCount = 0;
+    let emailSentCount = 0;
+
+    try {
+      // 1. Send notifications to assigned professionals
+      if (send_to_members && newlyAssignedMembers.length > 0) {
+        // Get issue details for notification
+        const issueType = issue.issue_type || 'General';
+        const title = issue.title || 'Issue Assigned';
+        const description = issue.description || '';
+        const currentAddress = issue.current_address || null;
+        const createdDate = issue.created_at || new Date();
+
+        // Get reporter details (the user who created the issue)
+        const reporter = issue.user;
+
+        // Send notification to each assigned professional
+        for (const professional of newlyAssignedMembers) {
+          await Notification.create({
+            user_id: professional.id,
+            message: `You have been assigned to issue #${issueId}: ${title}`,
+            message_type: "assigned_issue",
+            is_read: 0,
+            detail: {
+              issue_id: issue.id,
+              issue_number: issueId,
+              issue_type: issueType,
+              title: title,
+              description: description,
+              reported_by: reporter ? {
+                id: reporter.id,
+                name: reporter.full_name,
+                email1: reporter.email1,
+                mobile: reporter.mobile1
+              } : null,
+              current_address: currentAddress,
+              created_date: createdDate,
+              assigned_by: req.user?.full_name || 'Admin'
+            },
+            member_photo: "bell-icon.webp"
+          });
+          notificationSentCount++;
+
+          // Send email to assigned professional
+          const emailHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                        color: white;
+                        padding: 30px;
+                        text-align: center;
+                        border-radius: 10px 10px 0 0;
+                    }
+                    .content {
+                        background: #f9fafb;
+                        padding: 30px;
+                        border-radius: 0 0 10px 10px;
+                        border: 1px solid #e5e7eb;
+                        border-top: none;
+                    }
+                    .issue-details {
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin: 20px 0;
+                        border-left: 4px solid #3b82f6;
+                    }
+                    .reporter-info {
+                        background: #fef3c7;
+                        padding: 15px;
+                        border-radius: 8px;
+                        margin: 20px 0;
+                        border-left: 4px solid #f59e0b;
+                    }
+                    .button {
+                        display: inline-block;
+                        background: #3b82f6;
+                        color: white;
+                        padding: 12px 24px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin: 20px 0;
+                    }
+                    .footer {
+                        text-align: center;
+                        margin-top: 20px;
+                        font-size: 12px;
+                        color: #6b7280;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>📋 Issue Assigned to You</h1>
+                    <p>Action Required</p>
+                </div>
+                
+                <div class="content">
+                    <p>Dear <strong>${professional.full_name}</strong>,</p>
+                    
+                    <p>An issue has been assigned to you by <strong>${req.user?.full_name || 'Admin'}</strong>. Please review and take appropriate action.</p>
+                    
+                    ${reporter ? `
+                    <div class="reporter-info">
+                        <h3 style="margin-top: 0; color: #f59e0b;">👤 Reported By</h3>
+                        <p><strong>Name:</strong> ${reporter.full_name || 'Unknown'}</p>
+                        <p><strong>Email:</strong> ${reporter.email1 || 'Not provided'}</p>
+                        <p><strong>Mobile:</strong> ${reporter.mobile1 || 'Not provided'}</p>
+                    </div>
+                    ` : ''}
+                    
+                    <div class="issue-details">
+                        <h3 style="margin-top: 0; color: #3b82f6;">📋 Issue Details</h3>
+                        <p><strong>Issue ID:</strong> ${issueId}</p>
+                        <p><strong>Issue Type:</strong> ${issueType}</p>
+                        <p><strong>Title:</strong> ${title}</p>
+                        <p><strong>Description:</strong></p>
+                        <p style="background: #f3f4f6; padding: 10px; border-radius: 4px;">${description}</p>
+                        ${currentAddress ? `
+                          <p><strong>Location:</strong></p>
+                          <p style="background: #f3f4f6; padding: 10px; border-radius: 4px;">
+                            ${currentAddress.street ? `${currentAddress.street}, ` : ''}
+                            ${currentAddress.area ? `${currentAddress.area}, ` : ''}
+                            ${currentAddress.city ? `${currentAddress.city}, ` : ''}
+                            ${currentAddress.district ? `${currentAddress.district}, ` : ''}
+                            ${currentAddress.state ? `${currentAddress.state} - ` : ''}
+                            ${currentAddress.pincode ? `${currentAddress.pincode}` : ''}
+                          </p>
+                        ` : ''}
+                        <p><strong>Reported Date:</strong> ${new Date(createdDate).toLocaleString()}</p>
+                    </div>
+                    
+                    <center>
+                        <a href="https://edigacommunity.innogenx.co.in/dashboard/issues-management" class="button">
+                            🔍 View & Take Action
+                        </a>
+                    </center>
+                    
+                    <hr style="margin: 20px 0;">
+                    
+                    <p><strong>Next Steps:</strong></p>
+                    <ul>
+                        <li>Review the issue details</li>
+                        <li>Plan the resolution approach</li>
+                        <li>Update issue status as you work</li>
+                        <li>Communicate with the reporter if needed</li>
+                    </ul>
+                    
+                    <p>Best regards,<br>
+                    <strong>Ediga Community Team</strong></p>
+                </div>
+                
+                <div class="footer">
+                    <p>© 2025 Ediga Community. All rights reserved.</p>
+                    <p>This is an automated message, please do not reply directly to this email.</p>
+                </div>
+            </body>
+            </html>
+          `;
+
+          await transporter.sendMail({
+            from: `"Ediga Community" <${process.env.EMAIL_USER}>`,
+            to: professional.email1,
+            subject: `📋 Issue Assigned: #${issueId} - ${title}`,
+            html: emailHtml
+          });
+          emailSentCount++;
+        }
+
+        // 2. If send_to_members is true, also notify the issue reporter
+        if (reporter && reporter.id) {
+          await Notification.create({
+            user_id: reporter.id,
+            message: `Your issue #${issueId}: ${title} has been assigned to ${newlyAssignedMembers.length} professional(s). Please check your email.`,
+            message_type: "issue_assigned_to_volunteers",
+            is_read: 0,
+            detail: {
+              issue_id: issue.id,
+              issue_number: issueId,
+              title: title,
+              assigned_professionals: newlyAssignedMembers.map(m => ({
+                id: m.id,
+                name: m.full_name,
+                email: m.email1,
+                mobile: m.mobile1
+              })),
+              assigned_by: req.user?.full_name || 'Admin',
+              assigned_date: new Date()
+            },
+            member_photo: "bell-icon.webp"
+          });
+          notificationSentCount++;
+
+          // Send email to reporter
+          const reporterEmailHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                        color: white;
+                        padding: 30px;
+                        text-align: center;
+                        border-radius: 10px 10px 0 0;
+                    }
+                    .content {
+                        background: #f9fafb;
+                        padding: 30px;
+                        border-radius: 0 0 10px 10px;
+                        border: 1px solid #e5e7eb;
+                        border-top: none;
+                    }
+                    .professional-list {
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin: 20px 0;
+                        border-left: 4px solid #10b981;
+                    }
+                    .button {
+                        display: inline-block;
+                        background: #10b981;
+                        color: white;
+                        padding: 12px 24px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin: 20px 0;
+                    }
+                    .footer {
+                        text-align: center;
+                        margin-top: 20px;
+                        font-size: 12px;
+                        color: #6b7280;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>✅ Issue Assigned to Volunteers</h1>
+                    <p>Your issue is being processed</p>
+                </div>
+                
+                <div class="content">
+                    <p>Dear <strong>${reporter.full_name}</strong>,</p>
+                    
+                    <p>Good news! Your issue has been assigned to <strong>${newlyAssignedMembers.length}</strong> professional volunteer(s) by <strong>${req.user?.full_name || 'Admin'}</strong>.</p>
+                    
+                    <div class="professional-list">
+                        <h3 style="margin-top: 0; color: #10b981;">👨‍💼 Assigned Professionals</h3>
+                        ${newlyAssignedMembers.map((m, index) => `
+                          <p><strong>${index + 1}.</strong> ${m.full_name}${m.mobile1 ? ` (${m.mobile1})` : ''}</p>
+                        `).join('')}
+                    </div>
+                    
+                    <p><strong>Issue #${issueId}:</strong> ${title}</p>
+                    
+                    <center>
+                        <a href="https://edigacommunity.innogenx.co.in/dashboard/issues-management" class="button">
+                            🔍 Track Your Issue
+                        </a>
+                    </center>
+                    
+                    <p>Our volunteers will review your issue and reach out to you soon. You can track the progress using the button above.</p>
+                    
+                    <p>Best regards,<br>
+                    <strong>Ediga Community Team</strong></p>
+                </div>
+                
+                <div class="footer">
+                    <p>© 2025 Ediga Community. All rights reserved.</p>
+                    <p>This is an automated message, please do not reply directly to this email.</p>
+                </div>
+            </body>
+            </html>
+          `;
+
+          await transporter.sendMail({
+            from: `"Ediga Community" <${process.env.EMAIL_USER}>`,
+            to: reporter.email1,
+            subject: `✅ Issue #${issueId} Assigned to Volunteers - ${title}`,
+            html: reporterEmailHtml
+          });
+          emailSentCount++;
+        }
+      }
+
+    } catch (notificationError) {
+      console.error("Error sending notifications:", notificationError);
+      // Don't throw error - continue with response
+    }
 
     // Fetch the updated issue with all details
-    const updatedIssue = await Issue.findByPk(issue_id, {
+    const updatedIssue = await Issue.findByPk(issueId, {
       include: [
         {
           model: User,
           as: "user",
-          attributes: ['id', 'full_name', 'email', 'mobile_1']
+          attributes: ['id', 'full_name', 'email1', 'mobile1']
         },
         {
           model: User,
           as: "assignedMembers",
-          through: { 
-            attributes: ['issue_status', 'remarks'] // Only include columns that exist
+          through: {
+            attributes: ['issue_status', 'created_at', 'updated_at', 'send_to_members']
           },
-          attributes: ['id', 'full_name', 'member_type', 'profession', 'email', 'mobile_1', 'mobile_2', 'photo', 'years_of_experience', 'city', 'state', 'category']
+          attributes: [
+            'id', 
+            'full_name', 
+            'email1', 
+            'mobile1', 
+            'mobile2',
+            'member_photo',
+            'city',
+            'state',
+            'district',
+            'profession_id',
+            'specialization_id',
+            'blood_group',
+            'age',
+            'parent_name',
+            'organisation',
+            'booth_no',
+            'pin_code',
+            'member_type_id'
+          ]
         }
       ]
     });
 
-    // Separate assigned members by type for response
+    // Filter assigned members by member_type_id = 2
     const assignedProfessionals = updatedIssue.assignedMembers?.filter(
-      m => m.member_type === "professional_volunteer" || m.member_type === "volunteer_member"
-    ) || [];
-    
-    const assignedVolunteers = updatedIssue.assignedMembers?.filter(
-      m => m.member_type === "volunteer_member"
+      m => m.member_type_id === 2
     ) || [];
 
     return res.status(200).json({
       success: true,
-      message: `${trulyNewMemberIds.length} ${assignmentType}(s) assigned successfully`,
+      message: `${trulyNewMemberIds.length} professional(s) assigned successfully`,
       data: {
         issue: updatedIssue,
         assigned_professionals: assignedProfessionals,
-        assigned_volunteers: assignedVolunteers,
         newly_assigned_count: trulyNewMemberIds.length,
-        assignment_type: assignmentType,
-        newly_assigned_ids: trulyNewMemberIds
+        newly_assigned_ids: trulyNewMemberIds,
+        status_updated: issue.status !== newIssueStatus,
+        send_to_members: send_to_members,
+        notifications_sent: notificationSentCount,
+        emails_sent: emailSentCount
       }
     });
 
   } catch (error) {
+    await transaction.rollback();
     console.error("Error assigning members:", error);
     return res.status(500).json({
       success: false,
       message: "Error assigning members to issue",
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -1288,7 +1777,7 @@ export const updateIssueMemberStatus = async (req, res) => {
         {
           model: User,
           as: "member",
-          attributes: ['id', 'full_name', 'member_type', 'mobile_1', 'email', 'profession']
+          attributes: ['id', 'full_name', 'mobile1', 'email1', 'profession']
         }
       ]
     });
@@ -1339,7 +1828,7 @@ export const getIssueMemberStatuses = async (req, res) => {
         {
           model: User,
           as: "member",
-          attributes: ['id', 'full_name', 'member_type', 'mobile_1', 'email', 'profession', 'photo']
+          attributes: ['id', 'full_name', 'mobile1', 'email1', 'profession', 'member_photo']
         }
       ],
       order: [['id', 'ASC']]

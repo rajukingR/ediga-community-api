@@ -32,19 +32,7 @@ export default (sequelize, DataTypes) => {
             receiver: {
                 type: DataTypes.JSON,
                 allowNull: false,
-                validate: {
-                    isValidReceiver(value) {
-                        if (!Array.isArray(value)) {
-                            throw new Error('Receiver must be an array');
-                        }
-                        const validTypes = ['member', 'volunteer_member', 'professional_volunteer', 'admin'];
-                        for (const type of value) {
-                            if (!validTypes.includes(type)) {
-                                throw new Error(`Invalid receiver type: ${type}. Allowed: ${validTypes.join(', ')}`);
-                            }
-                        }
-                    }
-                }
+               
             },
 
             target_user_ids: {

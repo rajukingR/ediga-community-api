@@ -7,6 +7,8 @@ const Broadcast = db.Broadcast;
 const User = db.User;
 const Notification = db.Notification;
 const FcmToken = db.FcmToken;
+const MemberType  = db.MemberType ;
+
 
 // Email transporter configuration
 const transporter = nodemailer.createTransport({
@@ -37,29 +39,22 @@ export const createBroadcast = async (req, res) => {
         let usedUserIds = false;
         let parsedUserIds = null;
         let parsedReceiver = null;
+        let memberTypeIds = null;
 
-        // Parse receiver (if provided) – may be used for storage/logging
+        // Parse receiver (now contains member_type IDs)
         if (receiver) {
             if (typeof receiver === "string") {
                 try {
                     parsedReceiver = JSON.parse(receiver);
                 } catch (e) {
-                    parsedReceiver = receiver.split(",");
+                    parsedReceiver = receiver.split(",").map(id => parseInt(id.trim()));
                 }
             } else if (Array.isArray(receiver)) {
                 parsedReceiver = receiver;
             }
-            // Validate receiver types
-            const validTypes = ["member", "volunteer_member", "professional_volunteer", "admin"];
-            if (parsedReceiver && parsedReceiver.length > 0) {
-                const invalidTypes = parsedReceiver.filter(type => !validTypes.includes(type));
-                if (invalidTypes.length) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Invalid receiver types: ${invalidTypes.join(", ")}`,
-                    });
-                }
-            }
+
+            // Store member type IDs for later use
+            memberTypeIds = parsedReceiver;
         }
 
         // CASE A: user_ids provided (priority)
@@ -88,7 +83,7 @@ export const createBroadcast = async (req, res) => {
                     status: "approved",
                     is_active: true,
                 },
-                attributes: ['id', 'full_name', 'email', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'member_type_id']
             });
 
             if (targetUsers.length === 0) {
@@ -99,22 +94,42 @@ export const createBroadcast = async (req, res) => {
             }
             usedUserIds = true;
         }
-        // CASE B: only receiver provided (fallback to old behaviour)
+        // CASE B: only receiver (member_type_ids) provided
         else if (receiver && (!user_ids)) {
             if (!parsedReceiver || parsedReceiver.length === 0) {
                 return res.status(400).json({
                     success: false,
-                    message: "Receiver must be a non-empty array with valid types",
+                    message: "Receiver must be a non-empty array with valid member type IDs",
                 });
             }
 
+            // Validate that all member type IDs exist in the database
+            const validMemberTypes = await db.MemberType.findAll({
+                where: {
+                    id: { [Op.in]: parsedReceiver },
+                    is_active: true
+                },
+                attributes: ['id']
+            });
+
+            const validIds = validMemberTypes.map(mt => mt.id);
+            const invalidIds = parsedReceiver.filter(id => !validIds.includes(id));
+
+            if (invalidIds.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid member type IDs: ${invalidIds.join(", ")}. Please provide valid member type IDs.`,
+                });
+            }
+
+            // Fetch users with the given member_type_ids
             targetUsers = await User.findAll({
                 where: {
-                    member_type: { [Op.in]: parsedReceiver },
+                    member_type_id: { [Op.in]: parsedReceiver },
                     status: "approved",
                     is_active: true,
                 },
-                attributes: ['id', 'full_name', 'email', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'member_type_id']
             });
         }
         else {
@@ -146,13 +161,13 @@ export const createBroadcast = async (req, res) => {
         };
 
         if (usedUserIds) {
-            // Store the selected member types (receiver) as is (for audit)
+            // Store the selected member type IDs (receiver) for audit
             // and also store the specific user IDs in target_user_ids
-            broadcastData.receiver = parsedReceiver || [];
+            broadcastData.receiver = memberTypeIds || [];   // Store IDs instead of names
             broadcastData.target_user_ids = parsedUserIds;
         } else {
-            // Old flow: store receiver types only
-            broadcastData.receiver = parsedReceiver;
+            // Store receiver IDs only
+            broadcastData.receiver = memberTypeIds || [];
         }
 
         const broadcast = await Broadcast.create(broadcastData);
@@ -165,6 +180,97 @@ export const createBroadcast = async (req, res) => {
         let pushSentCount = 0;
         let failedEmails = [];
         let failedPush = [];
+
+        // Email HTML template
+        const getEmailHtml = (userName, title, description, image) => `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                        color: white;
+                        padding: 30px;
+                        text-align: center;
+                        border-radius: 10px 10px 0 0;
+                    }
+                    .content {
+                        background: #f9fafb;
+                        padding: 30px;
+                        border-radius: 0 0 10px 10px;
+                        border: 1px solid #e5e7eb;
+                        border-top: none;
+                    }
+                    .message-box {
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin: 20px 0;
+                        border-left: 4px solid #3b82f6;
+                    }
+                    .footer {
+                        text-align: center;
+                        margin-top: 20px;
+                        font-size: 12px;
+                        color: #6b7280;
+                    }
+                    .button {
+                        display: inline-block;
+                        background: #3b82f6;
+                        color: white;
+                        padding: 10px 20px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin-top: 15px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>📢 Community Broadcast</h1>
+                    <p>Important Announcement from Ediga Community</p>
+                </div>
+                
+                <div class="content">
+                    <p>Dear <strong>${userName}</strong>,</p>
+                    
+                    <div class="message-box">
+                        <h2 style="margin-top: 0; color: #2563eb;">${title}</h2>
+                        <p style="white-space: pre-line;">${description}</p>
+                        ${image ? `<div style="text-align: center; margin: 15px 0;">
+                            <img src="${process.env.IMAGE_API_URL}/broadcasts/${image}" alt="Broadcast Image" style="max-width: 100%; border-radius: 8px;">
+                        </div>` : ''}
+                    </div>
+                    
+                    <p>Please log in to the community portal for more details.</p>
+                    
+                    <center>
+                        <a href="${process.env.FRONTEND_URL}/dashboard/broadcasts" class="button">
+                            View All Broadcasts
+                        </a>
+                    </center>
+                    
+                    <hr style="margin: 20px 0;">
+                    
+                    <p>Best regards,<br>
+                    <strong>Ediga Community Team</strong></p>
+                </div>
+                
+                <div class="footer">
+                    <p>© ${new Date().getFullYear()} Ediga Community. All rights reserved.</p>
+                    <p>This is an automated message, please do not reply directly to this email1.</p>
+                </div>
+            </body>
+            </html>
+        `;
 
         for (const user of targetUsers) {
             try {
@@ -185,99 +291,10 @@ export const createBroadcast = async (req, res) => {
                 notificationSentCount++;
 
                 // Email
-                const emailHtml = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <style>
-                            body {
-                                font-family: Arial, sans-serif;
-                                line-height: 1.6;
-                                color: #333;
-                                max-width: 600px;
-                                margin: 0 auto;
-                                padding: 20px;
-                            }
-                            .header {
-                                background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-                                color: white;
-                                padding: 30px;
-                                text-align: center;
-                                border-radius: 10px 10px 0 0;
-                            }
-                            .content {
-                                background: #f9fafb;
-                                padding: 30px;
-                                border-radius: 0 0 10px 10px;
-                                border: 1px solid #e5e7eb;
-                                border-top: none;
-                            }
-                            .message-box {
-                                background: white;
-                                padding: 20px;
-                                border-radius: 8px;
-                                margin: 20px 0;
-                                border-left: 4px solid #3b82f6;
-                            }
-                            .footer {
-                                text-align: center;
-                                margin-top: 20px;
-                                font-size: 12px;
-                                color: #6b7280;
-                            }
-                            .button {
-                                display: inline-block;
-                                background: #3b82f6;
-                                color: white;
-                                padding: 10px 20px;
-                                text-decoration: none;
-                                border-radius: 6px;
-                                margin-top: 15px;
-                            }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="header">
-                            <h1>📢 Community Broadcast</h1>
-                            <p>Important Announcement from Ediga Community</p>
-                        </div>
-                        
-                        <div class="content">
-                            <p>Dear <strong>${user.full_name}</strong>,</p>
-                            
-                            <div class="message-box">
-                                <h2 style="margin-top: 0; color: #2563eb;">${title}</h2>
-                                <p style="white-space: pre-line;">${description}</p>
-                                ${image ? `<div style="text-align: center; margin: 15px 0;">
-                                    <img src="${process.env.IMAGE_API_URL}/broadcasts/${image}" alt="Broadcast Image" style="max-width: 100%; border-radius: 8px;">
-                                </div>` : ''}
-                            </div>
-                            
-                            <p>Please log in to the community portal for more details.</p>
-                            
-                            <center>
-                                <a href="${process.env.FRONTEND_URL}/dashboard/broadcasts" class="button">
-                                    View All Broadcasts
-                                </a>
-                            </center>
-                            
-                            <hr style="margin: 20px 0;">
-                            
-                            <p>Best regards,<br>
-                            <strong>Ediga Community Team</strong></p>
-                        </div>
-                        
-                        <div class="footer">
-                            <p>© 2025 Ediga Community. All rights reserved.</p>
-                            <p>This is an automated message, please do not reply directly to this email.</p>
-                        </div>
-                    </body>
-                    </html>
-                `;
-
+                const emailHtml = getEmailHtml(user.full_name, title, description, image);
                 await transporter.sendMail({
                     from: `"Ediga Community" <${process.env.EMAIL_USER}>`,
-                    to: user.email,
+                    to: user.email1,
                     subject: `📢 Community Broadcast: ${title}`,
                     html: emailHtml
                 });
@@ -304,7 +321,7 @@ export const createBroadcast = async (req, res) => {
                                     broadcast_title: String(title),
                                     description: String(description),
                                     image: image || null,
-                                    receiver_type: usedUserIds ? "specific_users" : user.member_type,
+                                    receiver_type: usedUserIds ? "specific_users" : "member_type_" + user.member_type_id,
                                     timestamp: new Date().toISOString()
                                 }
                             });
@@ -312,7 +329,7 @@ export const createBroadcast = async (req, res) => {
                         } catch (pushError) {
                             failedPush.push({
                                 user_id: user.id,
-                                email: user.email,
+                                email1: user.email1,
                                 token: fcmToken.token.substring(0, 20) + "...",
                                 error: pushError.message
                             });
@@ -320,12 +337,12 @@ export const createBroadcast = async (req, res) => {
                     });
                     Promise.allSettled(pushPromises).catch(err => console.error("Push batch error:", err.message));
                 } else {
-                    failedPush.push({ user_id: user.id, email: user.email, error: "No active FCM tokens" });
+                    failedPush.push({ user_id: user.id, email1: user.email1, error: "No active FCM tokens" });
                 }
 
             } catch (userError) {
                 console.error(`Failed for user ${user.id}:`, userError);
-                failedEmails.push({ user_id: user.id, email: user.email, error: userError.message });
+                failedEmails.push({ user_id: user.id, email1: user.email1, error: userError.message });
             }
         }
 
@@ -353,13 +370,14 @@ export const createBroadcast = async (req, res) => {
     }
 };
 
-
 /* ======================================================
    GET ALL BROADCASTS (PAGINATION)
 ====================================================== */
 export const getAllBroadcasts = async (req, res) => {
     try {
-        let { page = 1, limit = 10, status, receiver_type, search } = req.query;
+        let { page = 1, limit = 10, status, receiver, search } = req.query;
+        const loginUserId = req.user.id;
+        const isAdmin = req.user.member_type_id === null;
 
         page = Number(page);
         limit = Number(limit);
@@ -368,16 +386,50 @@ export const getAllBroadcasts = async (req, res) => {
         // Build where clause
         let where = {};
 
+        // For non-admin users, filter by target_user_ids containing their ID
+        if (!isAdmin) {
+            // Non-admin users can only see broadcasts where they are in target_user_ids
+            where.target_user_ids = {
+                [Op.and]: [
+                    Sequelize.literal(`JSON_CONTAINS(target_user_ids, '${loginUserId}')`)
+                ]
+            };
+        }
+
+        // Status filter (applies to both admin and non-admin)
         if (status) {
             where.status = status;
         }
 
-        if (receiver_type) {
-            where.receiver = {
-                [Op.contains]: [receiver_type]
-            };
+        // Handle receiver filter (only for admin users)
+        if (isAdmin && receiver && receiver !== 'all' && receiver !== '') {
+            // receiver is an ID (number)
+            const receiverId = parseInt(receiver);
+            if (!isNaN(receiverId) && receiverId > 0) {
+                // Optional: Check if member type exists
+                const memberType = await MemberType.findByPk(receiverId);
+                if (!memberType) {
+                    return res.status(404).json({
+                        success: false,
+                        message: `Member type with ID ${receiverId} not found`,
+                    });
+                }
+
+                // For MySQL, use JSON_CONTAINS with literal
+                where.receiver = {
+                    [Op.and]: [
+                        Sequelize.literal(`JSON_CONTAINS(receiver, '${receiverId}')`)
+                    ]
+                };
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid receiver ID. Must be a positive integer.",
+                });
+            }
         }
 
+        // Search filter (applies to both admin and non-admin)
         if (search) {
             where[Op.or] = [
                 { title: { [Op.like]: `%${search}%` } },
@@ -399,43 +451,47 @@ export const getAllBroadcasts = async (req, res) => {
             page,
             limit,
             totalPages: Math.ceil(count / limit),
+            filters: {
+                status: status || 'all',
+                receiver: receiver || 'all',
+                search: search || null,
+                user_type: isAdmin ? 'admin' : 'non-admin',
+                user_id: loginUserId
+            },
             data: rows,
         });
 
     } catch (error) {
-        console.error(error);
+        console.error("Error fetching broadcasts:", error);
         return res.status(500).json({
             success: false,
             message: "Error fetching broadcasts",
-            error: error.message,
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
     }
 };
 
-
+/* ======================================================
+   GET MEMBER TYPE BROADCASTS (For logged-in user)
+====================================================== */
 export const getMemberTypeAllBroadcasts = async (req, res) => {
     try {
-
         // Logged in user
         const user = req.user;
 
-        // member / volunteer_member / professional_volunteer
-        const memberType = user.member_type;
+        // Get member_type_id from user
+        const memberTypeId = user.member_type_id;
 
-        // =========================
-        // GET BROADCASTS
-        // =========================
+        // Get broadcasts for this member type ID
         const broadcasts = await Broadcast.findAll({
             where: {
                 status: "sent",
-
                 [Op.and]: [
                     Sequelize.literal(
-                        `JSON_CONTAINS(receiver, '["${memberType}"]')`
+                        `JSON_CONTAINS(receiver, '["${memberTypeId}"]')`
                     )
                 ]
             },
-
             order: [["id", "DESC"]]
         });
 
@@ -446,9 +502,7 @@ export const getMemberTypeAllBroadcasts = async (req, res) => {
         });
 
     } catch (error) {
-
         console.error(error);
-
         return res.status(500).json({
             success: false,
             message: "Error fetching broadcasts",
@@ -456,6 +510,7 @@ export const getMemberTypeAllBroadcasts = async (req, res) => {
         });
     }
 };
+
 /* ======================================================
    GET BROADCAST BY ID (with recipient users)
 ====================================================== */
@@ -483,7 +538,7 @@ export const getBroadcastById = async (req, res) => {
                     status: "approved",
                     is_active: 1,
                 },
-                attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'mobile1', 'district', 'member_type_id']
             });
 
             // Map users by id for quick lookup
@@ -511,7 +566,6 @@ export const getBroadcastById = async (req, res) => {
         });
     }
 };
-
 
 /* ======================================================
    GET BROADCAST BY BROADCAST_ID
@@ -545,6 +599,9 @@ export const getBroadcastByBroadcastId = async (req, res) => {
     }
 };
 
+/* ======================================================
+   UPDATE BROADCAST
+====================================================== */
 export const updateBroadcast = async (req, res) => {
     try {
         const { id } = req.params;
@@ -559,6 +616,9 @@ export const updateBroadcast = async (req, res) => {
             remove_file,
         } = req.body;
 
+        console.log("BODY =>", req.body);
+        console.log("FILE =>", req.file);
+
         // Find broadcast
         const broadcast = await Broadcast.findByPk(id);
 
@@ -569,40 +629,42 @@ export const updateBroadcast = async (req, res) => {
             });
         }
 
-        // Parse receiver (if provided)
+        // Parse receiver (now contains IDs)
         let parsedReceiver = null;
         if (receiver) {
             if (typeof receiver === "string") {
                 try {
                     parsedReceiver = JSON.parse(receiver);
                 } catch (err) {
-                    parsedReceiver = receiver.split(",");
+                    parsedReceiver = receiver.split(",").map(id => parseInt(id.trim()));
                 }
             } else if (Array.isArray(receiver)) {
                 parsedReceiver = receiver;
             }
 
-            // Validate receiver types
+            // Validate receiver (check if they are valid member type IDs)
             if (parsedReceiver && parsedReceiver.length > 0) {
-                const validTypes = [
-                    "member",
-                    "volunteer_member",
-                    "professional_volunteer",
-                    "admin"
-                ];
-                const invalidTypes = parsedReceiver.filter(
-                    (type) => !validTypes.includes(type)
-                );
-                if (invalidTypes.length > 0) {
+                const validMemberTypes = await db.MemberType.findAll({
+                    where: {
+                        id: { [Op.in]: parsedReceiver },
+                        is_active: true
+                    },
+                    attributes: ['id']
+                });
+
+                const validIds = validMemberTypes.map(mt => mt.id);
+                const invalidIds = parsedReceiver.filter(id => !validIds.includes(id));
+
+                if (invalidIds.length > 0) {
                     return res.status(400).json({
                         success: false,
-                        message: `Invalid receiver types: ${invalidTypes.join(", ")}`,
+                        message: `Invalid member type IDs: ${invalidIds.join(", ")}`,
                     });
                 }
             }
         }
 
-        // Parse user_ids (if provided)
+        // Parse user_ids (specific users)
         let parsedUserIds = null;
         if (user_ids) {
             if (typeof user_ids === "string") {
@@ -671,7 +733,7 @@ export const updateBroadcast = async (req, res) => {
             updateData.status = cleanedStatus;
         }
 
-        // Update receiver field
+        // Update receiver field (store IDs)
         if (parsedReceiver !== null) {
             updateData.receiver = parsedReceiver;
         }
@@ -726,7 +788,7 @@ export const updateBroadcast = async (req, res) => {
                     status: "approved",
                     is_active: 1,
                 },
-                attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                attributes: ['id', 'full_name', 'email1', 'mobile1', 'district', 'member_type_id']
             });
 
             const userMap = {};
@@ -831,6 +893,15 @@ export const deleteBroadcast = async (req, res) => {
             });
         }
 
+        // Delete associated image file if exists
+        if (broadcast.image) {
+            const fs = await import('fs');
+            const path = await import('path');
+            const filePath = path.join(process.cwd(), 'uploads', broadcast.image);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        }
 
         await broadcast.destroy();
 
@@ -849,18 +920,22 @@ export const deleteBroadcast = async (req, res) => {
 };
 
 /* ======================================================
-   GET BROADCASTS BY RECEIVER TYPE
+   GET BROADCASTS BY RECEIVER TYPE (ID)
 ====================================================== */
 export const getBroadcastsByReceiverType = async (req, res) => {
     try {
         const { receiver_type } = req.params;
         let { page = 1, limit = 10, status } = req.query;
 
-        const validTypes = ['member', 'volunteer_member', 'professional_volunteer'];
-        if (!validTypes.includes(receiver_type)) {
+        // receiver_type is now an ID
+        const receiverTypeId = parseInt(receiver_type);
+
+        // Validate if the member type exists
+        const memberType = await db.MemberType.findByPk(receiverTypeId);
+        if (!memberType) {
             return res.status(400).json({
                 success: false,
-                message: `Invalid receiver type. Allowed: ${validTypes.join(', ')}`
+                message: `Invalid member type ID: ${receiver_type}`
             });
         }
 
@@ -870,7 +945,7 @@ export const getBroadcastsByReceiverType = async (req, res) => {
 
         let where = {
             receiver: {
-                [Op.contains]: [receiver_type]
+                [Op.contains]: [receiverTypeId]
             }
         };
 
@@ -917,7 +992,7 @@ export const bulkDeleteBroadcasts = async (req, res) => {
             });
         }
 
-        // Optional: Check for sent broadcasts
+        // Check for sent broadcasts
         const sentBroadcasts = await Broadcast.findAll({
             where: {
                 id: {
@@ -932,6 +1007,27 @@ export const bulkDeleteBroadcasts = async (req, res) => {
                 success: false,
                 message: `Cannot delete ${sentBroadcasts.length} broadcast(s) that are already sent`
             });
+        }
+
+        // Delete associated image files
+        const broadcastsToDelete = await Broadcast.findAll({
+            where: {
+                id: {
+                    [Op.in]: ids
+                }
+            },
+            attributes: ['image']
+        });
+
+        for (const broadcast of broadcastsToDelete) {
+            if (broadcast.image) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const filePath = path.join(process.cwd(), 'uploads', broadcast.image);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            }
         }
 
         const deleted = await Broadcast.destroy({
@@ -969,30 +1065,24 @@ export const getBroadcastStatistics = async (req, res) => {
         const failed = await Broadcast.count({ where: { status: 'failed' } });
         const cancelled = await Broadcast.count({ where: { status: 'cancelled' } });
 
-        // Get counts by receiver type
-        const memberBroadcasts = await Broadcast.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['member']
-                }
-            }
+        // Get all member types
+        const memberTypes = await db.MemberType.findAll({
+            where: { is_active: true },
+            attributes: ['id', 'member_type_name']
         });
 
-        const volunteerMemberBroadcasts = await Broadcast.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['volunteer_member']
+        // Get counts by receiver type (using IDs)
+        const byReceiverType = {};
+        for (const mt of memberTypes) {
+            const count = await Broadcast.count({
+                where: {
+                    receiver: {
+                        [Op.contains]: [mt.id]
+                    }
                 }
-            }
-        });
-
-        const professionalVolunteerBroadcasts = await Broadcast.count({
-            where: {
-                receiver: {
-                    [Op.contains]: ['professional_volunteer']
-                }
-            }
-        });
+            });
+            byReceiverType[mt.member_type_name] = count;
+        }
 
         // Get recent broadcasts (last 5)
         const recentBroadcasts = await Broadcast.findAll({
@@ -1012,11 +1102,7 @@ export const getBroadcastStatistics = async (req, res) => {
                     failed: failed,
                     cancelled: cancelled
                 },
-                by_receiver_type: {
-                    member: memberBroadcasts,
-                    volunteer_member: volunteerMemberBroadcasts,
-                    professional_volunteer: professionalVolunteerBroadcasts
-                },
+                by_receiver_type: byReceiverType,
                 recent_broadcasts: recentBroadcasts
             }
         });

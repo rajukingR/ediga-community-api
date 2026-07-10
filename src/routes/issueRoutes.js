@@ -3,6 +3,7 @@ import {
   createIssue,
   getAllIssues,
   getAllIssuesByUserId,
+  getIssuesAssignedToUser,
   getAllIssuesById,
   getIssueById,
   updateIssue,
@@ -18,6 +19,8 @@ const router = express.Router();
 router.post("/create", createIssue);
 router.get("/", authMiddleware, getAllIssues);
 router.get("/user/:id", authMiddleware, getAllIssuesByUserId);
+router.get("/assigned-to/:userId", authMiddleware, getIssuesAssignedToUser);
+
 router.get("/assigned-by/:id", authMiddleware, getAllIssuesById);
 router.get("/:id", authMiddleware, getIssueById);
 router.put("/:id", authMiddleware, updateIssue);

@@ -244,7 +244,7 @@ export const getAllWork = async (req, res) => {
                 {
                     model: db.User,
                     as: 'assigner',
-                    attributes: ['id', 'full_name', 'email', 'member_type']
+                    attributes: ['id', 'full_name', 'email1', 'member_type']
                 },
                 {
                     model: WorkManagementUser,
@@ -252,7 +252,7 @@ export const getAllWork = async (req, res) => {
                     include: [{
                         model: db.User,
                         as: 'user',
-                        attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                        attributes: ['id', 'full_name', 'email1', 'mobile_1', 'district', 'member_type']
                     }]
                 }
             ],
@@ -291,7 +291,7 @@ export const getWorkById = async (req, res) => {
                 {
                     model: db.User,
                     as: 'assigner',
-                    attributes: ['id', 'full_name', 'email', 'member_type']
+                    attributes: ['id', 'full_name', 'email1', 'member_type']
                 },
                 {
                     model: WorkManagementUser,
@@ -299,7 +299,7 @@ export const getWorkById = async (req, res) => {
                     include: [{
                         model: db.User,
                         as: 'user',
-                        attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                        attributes: ['id', 'full_name', 'email1', 'mobile_1', 'district', 'member_type']
                     }]
                 }
             ]
@@ -354,7 +354,7 @@ export const getWorkByWorkId = async (req, res) => {
                 {
                     model: db.User,
                     as: 'assigner',
-                    attributes: ['id', 'full_name', 'email', 'member_type']
+                    attributes: ['id', 'full_name', 'email1', 'member_type']
                 },
                 {
                     model: WorkManagementUser,
@@ -362,7 +362,7 @@ export const getWorkByWorkId = async (req, res) => {
                     include: [{
                         model: db.User,
                         as: 'user',
-                        attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                        attributes: ['id', 'full_name', 'email1', 'mobile_1', 'district', 'member_type']
                     }]
                 }
             ]
@@ -914,14 +914,14 @@ export const getAssignableUsers = async (req, res) => {
         if (search) {
             whereCondition[Op.or] = [
                 { full_name: { [Op.like]: `%${search}%` } },
-                { email: { [Op.like]: `%${search}%` } },
+                { email1: { [Op.like]: `%${search}%` } },
                 { mobile_1: { [Op.like]: `%${search}%` } }
             ];
         }
 
         const users = await User.findAll({
             where: whereCondition,
-            attributes: ['id', 'full_name', 'email', 'member_type', 'mobile_1', 'district'],
+            attributes: ['id', 'full_name', 'email1', 'member_type', 'mobile_1', 'district'],
             order: [['full_name', 'ASC']]
         });
 
@@ -1046,7 +1046,7 @@ export const getMyWork = async (req, res) => {
                 {
                     model: db.User,
                     as: 'assigner',
-                    attributes: ['id', 'full_name', 'email', 'member_type']
+                    attributes: ['id', 'full_name', 'email1', 'member_type']
                 },
                 {
                     model: WorkManagementUser,
@@ -1054,7 +1054,7 @@ export const getMyWork = async (req, res) => {
                     include: [{
                         model: db.User,
                         as: 'user',
-                        attributes: ['id', 'full_name', 'email', 'mobile_1', 'district', 'member_type']
+                        attributes: ['id', 'full_name', 'email1', 'mobile_1', 'district', 'member_type']
                     }],
                     where: user.member_type === 'volunteer_member' ? { user_id: user.id } : {},
                     required: false
@@ -1110,13 +1110,13 @@ export const getUserWorkStatus = async (req, res) => {
                     include: [{
                         model: db.User,
                         as: 'assigner',
-                        attributes: ['id', 'full_name', 'email']
+                        attributes: ['id', 'full_name', 'email1']
                     }]
                 },
                 {
                     model: db.User,
                     as: 'user',
-                    attributes: ['id', 'full_name', 'email', 'member_type']
+                    attributes: ['id', 'full_name', 'email1', 'member_type']
                 }
             ]
         });

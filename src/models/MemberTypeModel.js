@@ -1,6 +1,6 @@
 export default (sequelize, DataTypes) => {
-  const Category = sequelize.define(
-    "Category",
+  const MemberType = sequelize.define(
+    "MemberType",
     {
       id: {
         type: DataTypes.INTEGER,
@@ -8,7 +8,7 @@ export default (sequelize, DataTypes) => {
         primaryKey: true,
       },
 
-      category_name: {
+      member_type_name: {
         type: DataTypes.STRING,
         allowNull: false,
       },
@@ -34,26 +34,17 @@ export default (sequelize, DataTypes) => {
       },
     },
     {
-      tableName: "categories",
+      tableName: "member_types",
       timestamps: false,
     }
   );
 
-  Category.associate = (models) => {
-    Category.hasMany(models.SubCategory, {
-      foreignKey: "category_id",
-      as: "sub_categories",
-    });
+  MemberType.associate = (models) => {
+  MemberType.hasMany(models.User, {
+    foreignKey: "member_type_id",
+    as: "users",
+  });
+};
 
-    Category.hasMany(models.User, {
-      foreignKey: "category_id",
-      as: "users",
-    });
-    Category.hasMany(models.Issue, {
-      foreignKey: "category_id",
-      as: "issues",
-    });
-  };
-
-  return Category;
+  return MemberType;
 };

@@ -7,130 +7,6 @@ export default (sequelize, DataTypes) => {
         autoIncrement: true,
         primaryKey: true,
       },
-      full_name: {
-        type: DataTypes.STRING(150),
-      },
-      parents_name: {
-        type: DataTypes.STRING(150),
-      },
-      member_type: {
-        type: DataTypes.ENUM('admin', 'member', 'professional_volunteer', 'volunteer_member'),
-        defaultValue: 'member',
-        allowNull: false,
-      },
-      superior_id: {
-        type: DataTypes.INTEGER,
-      },
-      category: {
-        type: DataTypes.STRING(50),
-      },
-      blood_group: {
-        type: DataTypes.STRING(10),
-      },
-      date_of_birth: {
-        type: DataTypes.DATEONLY,
-      },
-      age: {
-        type: DataTypes.INTEGER,
-      },
-      voter_id: {
-        type: DataTypes.STRING(50),
-      },
-      aadhaar_number: {
-        type: DataTypes.STRING(20),
-      },
-      organization: {
-        type: DataTypes.STRING(150),
-      },
-      profession: {
-        type: DataTypes.STRING(100),
-      },
-      business_description: {
-        type: DataTypes.TEXT,
-      },
-      address: {
-        type: DataTypes.JSON,
-        allowNull: true,
-      },
-      booth_no: {
-        type: DataTypes.STRING(20),
-      },
-      taluk_zone: {
-        type: DataTypes.STRING(100),
-      },
-      city: {
-        type: DataTypes.STRING(100),
-      },
-      district: {
-        type: DataTypes.STRING(100),
-      },
-      state: {
-        type: DataTypes.STRING(100),
-      },
-      pin_code: {
-        type: DataTypes.STRING(10),
-      },
-      ls_sabha: {
-        type: DataTypes.STRING(100),
-      },
-      vs_sabha: {
-        type: DataTypes.STRING(100),
-      },
-      mobile_1: {
-        type: DataTypes.STRING(15),
-      },
-      mobile_2: {
-        type: DataTypes.STRING(15),
-      },
-      phone_1: {
-        type: DataTypes.STRING(15),
-      },
-      phone_2: {
-        type: DataTypes.STRING(15),
-      },
-      email: {
-        type: DataTypes.STRING(150),
-      },
-      password: {
-        type: DataTypes.STRING(255),
-      },
-      status: {
-        type: DataTypes.ENUM("pending", "approved", "rejected"),
-        defaultValue: "pending",
-      },
-      is_active: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-      },
-      remark: {
-        type: DataTypes.TEXT,
-      },
-      document_file: {
-        type: DataTypes.STRING(255),
-      },
-      photo: {
-        type: DataTypes.STRING(255),
-      },
-      last_login: {
-        type: DataTypes.DATE,
-      },
-      reset_token: {
-        type: DataTypes.STRING(255),
-        allowNull: true,
-      },
-      reset_token_expiry: {
-        type: DataTypes.DATE,
-        allowNull: true,
-      },
-      years_of_experience: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-      },
-      service_type: {
-        type: DataTypes.STRING(100),
-        allowNull: true,
-        defaultValue: null,
-      },
 
       member_id: {
         type: DataTypes.STRING(50),
@@ -138,43 +14,207 @@ export default (sequelize, DataTypes) => {
         allowNull: true,
       },
 
-      email_2: {
-        type: DataTypes.STRING(150),
+      full_name: {
+        type: DataTypes.STRING(100),
+      },
+
+      member_type_id: {
+        type: DataTypes.INTEGER,
+      },
+
+      category_id: {
+        type: DataTypes.INTEGER,
+      },
+
+      sub_category_id: {
+        type: DataTypes.INTEGER,
+      },
+
+      specialization_id: {
+        type: DataTypes.INTEGER,
+      },
+
+      blood_group: {
+        type: DataTypes.STRING(10),
+      },
+
+      dob: {
+        type: DataTypes.DATEONLY,
+      },
+
+      age: {
+        type: DataTypes.INTEGER,
+      },
+
+      parent_name: {
+        type: DataTypes.STRING(255),
+      },
+
+      aadhar_no: {
+        type: DataTypes.STRING(20),
+      },
+
+      voter_id_no: {
+        type: DataTypes.STRING(20),
+      },
+
+      contact_person: {
+        type: DataTypes.STRING(100),
+      },
+
+      organisation: {
+        type: DataTypes.STRING(255),
+      },
+
+      profession_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+
+      address: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+
+      booth_no: {
+        type: DataTypes.STRING(50),
+      },
+
+      pin_code: {
+        type: DataTypes.STRING(10),
+      },
+
+      city: {
+        type: DataTypes.STRING(100),
+      },
+
+      district: {
+        type: DataTypes.STRING(100),
+      },
+
+      state: {
+        type: DataTypes.STRING(100),
+      },
+
+      ls_sabha_mp: {
+        type: DataTypes.STRING(255),
+      },
+
+      ls_code: {
+        type: DataTypes.STRING(20),
+      },
+
+      vs_sabha_mla: {
+        type: DataTypes.STRING(255),
+      },
+
+      vs_code: {
+        type: DataTypes.STRING(20),
+      },
+
+      panchayat: {
+        type: DataTypes.STRING(255),
+      },
+
+      ward: {
+        type: DataTypes.STRING(100),
+      },
+
+      mobile1: {
+        type: DataTypes.STRING(20),
+      },
+
+      mobile2: {
+        type: DataTypes.STRING(20),
+      },
+
+      other_phone: {
+        type: DataTypes.STRING(20),
+      },
+
+      phone1_office: {
+        type: DataTypes.STRING(20),
+      },
+
+      phone2_office: {
+        type: DataTypes.STRING(20),
+      },
+
+      phone_residence: {
+        type: DataTypes.STRING(20),
+      },
+
+      email1: {
+        type: DataTypes.STRING(255),
+      },
+
+      email2: {
+        type: DataTypes.STRING(255),
+      },
+
+      password: {
+        type: DataTypes.STRING(255),
+      },
+
+      otp_code: {
+        type: DataTypes.STRING(10),
+        allowNull: true,
+        defaultValue: null
+      },
+      otp_expiry: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null
+      },
+
+      reset_token: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+
+      reset_token_expiry: {
+        type: DataTypes.DATE,
         allowNull: true,
       },
 
       website: {
         type: DataTypes.STRING(255),
-        allowNull: true,
       },
 
-      aadhaar_photo: {
+      remark: {
+        type: DataTypes.TEXT,
+      },
+
+      document_file: {
         type: DataTypes.STRING(255),
-        allowNull: true,
       },
 
-      voter_photo: {
+      voter_document_file: {
         type: DataTypes.STRING(255),
-        allowNull: true,
       },
 
-      panchayat: {
-        type: DataTypes.STRING(100),
-        allowNull: true,
+      aadhar_document_file: {
+        type: DataTypes.STRING(255),
       },
 
-      ward: {
-        type: DataTypes.STRING(100),
-        allowNull: true,
+      member_photo: {
+        type: DataTypes.STRING(255),
       },
 
-      area: {
-        type: DataTypes.STRING(100),
-        allowNull: true,
+      is_active: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
       },
+
+      status: {
+        type: DataTypes.ENUM("Pending", "Approved", "Rejected"),
+        defaultValue: "Pending",
+      },
+
       created_at: {
         type: DataTypes.DATE,
       },
+
       updated_at: {
         type: DataTypes.DATE,
       },
@@ -185,38 +225,35 @@ export default (sequelize, DataTypes) => {
     }
   );
 
-  // Associations
   User.associate = (models) => {
-    // User has many Issues (as reporter)
-    User.hasMany(models.Issue, {
-      foreignKey: "user_id",
-      as: "reportedIssues",
+    // Existing association
+    User.belongsTo(models.MemberType, {
+      foreignKey: "member_type_id",
+      as: "memberType",
     });
 
-    // User has many IssueMemberStatus as member
-    User.hasMany(models.IssueMemberStatus, {
-      foreignKey: "member_id",
-      as: "issueStatuses",
+    // Add Category association
+    User.belongsTo(models.Category, {
+      foreignKey: "category_id",
+      as: "category",
     });
 
-    User.belongsTo(User, {
-      foreignKey: "superior_id",
-      as: "superior"
+    // Add SubCategory association
+    User.belongsTo(models.SubCategory, {
+      foreignKey: "sub_category_id",
+      as: "sub_category",
     });
 
-
-    // User belongs to many Issues through IssueMemberStatus (assigned issues)
-    User.belongsToMany(models.Issue, {
-      through: models.IssueMemberStatus,
-      foreignKey: "member_id",
-      otherKey: "issue_id",
-      as: "assignedIssues",
+    // Profession
+    User.belongsTo(models.Profession, {
+      foreignKey: "profession_id",
+      as: "profession",
     });
 
-    User.hasMany(models.WorkManagement, {
-      foreignKey: "assigned_by",
-      as: "assignedWorks",
-      sourceKey: "id"
+    // Add Specialization association
+    User.belongsTo(models.Specialization, {
+      foreignKey: "specialization_id",
+      as: "specialization",
     });
   };
 

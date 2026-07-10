@@ -174,19 +174,19 @@ router.post("/verify-mobile-otp", async (req, res) => {
 });
 
 // Send Email OTP
-router.post("/send-email-otp", async (req, res) => {
+router.post("/send-email1-otp", async (req, res) => {
     try {
-        const { email } = req.body;
+        const { email1 } = req.body;
         
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (!email1 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email1)) {
             return res.status(400).json({ 
                 success: false, 
-                message: "Invalid email address" 
+                message: "Invalid email1 address" 
             });
         }
         
         // Rate limiting check
-        const rateKey = `rate:email:${email}`;
+        const rateKey = `rate:email1:${email1}`;
         const rateData = otpStore.get(rateKey);
         if (rateData && rateData.count >= 3 && Date.now() < rateData.resetTime) {
             const waitTime = Math.ceil((rateData.resetTime - Date.now()) / 1000);
@@ -201,7 +201,7 @@ router.post("/send-email-otp", async (req, res) => {
         
         // Store OTP
         const expiresAt = Date.now() + (5 * 60 * 1000);
-        otpStore.set(`email:${email}`, {
+        otpStore.set(`email1:${email1}`, {
             otp,
             expiresAt,
             attempts: 0,
@@ -220,39 +220,39 @@ router.post("/send-email-otp", async (req, res) => {
         }
         
         // Log OTP for development
-        console.log(`📧 Email OTP for ${email}: ${otp}`);
+        console.log(`📧 Email OTP for ${email1}: ${otp}`);
         
-        // For production, you would send actual email here
-        // Using Firebase Admin's email service or nodemailer
+        // For production, you would send actual email1 here
+        // Using Firebase Admin's email1 service or nodemailer
         
         res.json({ 
             success: true, 
-            message: "OTP sent to email successfully!",
+            message: "OTP sent to email1 successfully!",
             dev_only: process.env.NODE_ENV === 'development' ? { otp } : undefined
         });
         
     } catch (error) {
-        console.error("Send email OTP error:", error);
+        console.error("Send email1 OTP error:", error);
         res.status(500).json({ 
             success: false, 
-            message: "Failed to send email OTP" 
+            message: "Failed to send email1 OTP" 
         });
     }
 });
 
 // Verify Email OTP
-router.post("/verify-email-otp", async (req, res) => {
+router.post("/verify-email1-otp", async (req, res) => {
     try {
-        const { email, otp } = req.body;
+        const { email1, otp } = req.body;
         
-        if (!email || !otp) {
+        if (!email1 || !otp) {
             return res.status(400).json({ 
                 success: false, 
                 message: "Email and OTP are required" 
             });
         }
         
-        const storedData = otpStore.get(`email:${email}`);
+        const storedData = otpStore.get(`email1:${email1}`);
         
         if (!storedData) {
             return res.status(400).json({ 
@@ -269,7 +269,7 @@ router.post("/verify-email-otp", async (req, res) => {
         }
         
         if (Date.now() > storedData.expiresAt) {
-            otpStore.delete(`email:${email}`);
+            otpStore.delete(`email1:${email1}`);
             return res.status(400).json({ 
                 success: false, 
                 message: "OTP has expired" 
@@ -278,7 +278,7 @@ router.post("/verify-email-otp", async (req, res) => {
         
         if (storedData.otp !== otp) {
             storedData.attempts++;
-            otpStore.set(`email:${email}`, storedData);
+            otpStore.set(`email1:${email1}`, storedData);
             return res.status(400).json({ 
                 success: false, 
                 message: "Invalid OTP" 
@@ -286,7 +286,7 @@ router.post("/verify-email-otp", async (req, res) => {
         }
         
         storedData.verified = true;
-        otpStore.set(`email:${email}`, storedData);
+        otpStore.set(`email1:${email1}`, storedData);
         
         res.json({ 
             success: true, 
@@ -294,7 +294,7 @@ router.post("/verify-email-otp", async (req, res) => {
         });
         
     } catch (error) {
-        console.error("Verify email OTP error:", error);
+        console.error("Verify email1 OTP error:", error);
         res.status(500).json({ 
             success: false, 
             message: "Verification failed" 
@@ -305,13 +305,13 @@ router.post("/verify-email-otp", async (req, res) => {
 // Check verification status
 router.post("/check-verification", async (req, res) => {
     try {
-        const { mobileNumber, email } = req.body;
+        const { mobileNumber, email1 } = req.body;
         
         const mobileVerified = mobileNumber ? 
             otpStore.get(mobileNumber)?.verified || false : false;
         
-        const emailVerified = email ? 
-            otpStore.get(`email:${email}`)?.verified || false : false;
+        const emailVerified = email1 ? 
+            otpStore.get(`email1:${email1}`)?.verified || false : false;
         
         res.json({
             success: true,
@@ -331,7 +331,7 @@ router.post("/check-verification", async (req, res) => {
 // Resend OTP (with cooldown)
 router.post("/resend-otp", async (req, res) => {
     try {
-        const { mobileNumber, email, type } = req.body;
+        const { mobileNumber, email1, type } = req.body;
         
         if (type === 'mobile' && mobileNumber) {
             // Check cooldown (30 seconds)
@@ -360,8 +360,8 @@ router.post("/resend-otp", async (req, res) => {
             
             res.json({ success: true, message: "OTP resent successfully!" });
             
-        } else if (type === 'email' && email) {
-            const lastSent = otpStore.get(`last_sent:email:${email}`);
+        } else if (type === 'email1' && email1) {
+            const lastSent = otpStore.get(`last_sent:email1:${email1}`);
             if (lastSent && Date.now() - lastSent < 30000) {
                 const waitTime = Math.ceil((30000 - (Date.now() - lastSent)) / 1000);
                 return res.status(429).json({ 
@@ -370,18 +370,18 @@ router.post("/resend-otp", async (req, res) => {
                 });
             }
             
-            otpStore.set(`last_sent:email:${email}`, Date.now());
+            otpStore.set(`last_sent:email1:${email1}`, Date.now());
             
             const otp = generateOTP();
             const expiresAt = Date.now() + (5 * 60 * 1000);
-            otpStore.set(`email:${email}`, {
+            otpStore.set(`email1:${email1}`, {
                 otp,
                 expiresAt,
                 attempts: 0,
                 verified: false
             });
             
-            console.log(`🔄 Resent email OTP for ${email}: ${otp}`);
+            console.log(`🔄 Resent email1 OTP for ${email1}: ${otp}`);
             
             res.json({ success: true, message: "OTP resent successfully!" });
             

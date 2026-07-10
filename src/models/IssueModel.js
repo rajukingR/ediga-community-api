@@ -29,6 +29,10 @@ export default (sequelize, DataTypes) => {
                 type: DataTypes.STRING(100),
                 allowNull: false,
             },
+            category_id: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+            },
             title: {
                 type: DataTypes.STRING(255),
                 allowNull: false,
@@ -104,8 +108,12 @@ export default (sequelize, DataTypes) => {
             as: "assignedMembers",
         });
 
+        // Issue belongs to Category
+        Issue.belongsTo(models.Category, {
+            foreignKey: "category_id",
+            as: "category",
+        });
 
-        
     };
 
     return Issue;
